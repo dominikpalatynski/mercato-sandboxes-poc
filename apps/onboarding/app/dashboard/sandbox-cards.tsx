@@ -6,6 +6,7 @@ import { ArrowUpRight, MonitorCog, Trash2 } from 'lucide-react';
 
 import StatusBadge from '@/components/status-badge';
 import WorkspaceStats from '@/components/workspace-stats';
+import BuildMicrosteps, { parseStatusMessage } from '@/components/build-microsteps';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -118,9 +119,23 @@ export default function SandboxCards({ initial }: Props): React.ReactElement {
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <StatusBadge status={s.status} />
                 <span>created {formatRelative(s.created_at)}</span>
-                {s.status_message && (
-                  <span className="truncate">· {s.status_message}</span>
-                )}
+                {/* Iconified micro-stepper replaces the raw `job=…, lifecycle=…` debug text. */}
+                {(() => {
+                  const parsed = parseStatusMessage(s.status_message);
+                  // Only render the microsteps when we have something meaningful
+                  // to show (i.e. the workspace isn't terminal & we have at
+                  // least one structured field). The component itself returns
+                  // null on `ready`, and renders an inline error on `failed`.
+                  if (s.status === 'ready') return null;
+                  return (
+                    <BuildMicrosteps
+                      status={s.status}
+                      jobStatus={parsed.jobStatus}
+                      agentStatus={null}
+                      lifecycleState={parsed.lifecycleState}
+                    />
+                  );
+                })()}
               </div>
             </div>
 
