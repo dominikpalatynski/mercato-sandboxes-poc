@@ -1,0 +1,94 @@
+# Mercato Sandboxes POC - control plane services
+#
+# Brings up:
+#   - postgres-coder       : Coder's metadata DB (postgres:17)
+#   - postgres-onboarding  : Onboarding app DB (postgres:17-alpine, host port 5544)
+#   - coder                : Coder control plane (ghcr.io/coder/coder:latest, host port 7080)
+#
+# The onboarding Next.js service (apps/onboarding/) is added in task #5; its build
+# context does not yet exist, so it is intentionally omitted from this compose file.
+
+name: mercato-sandboxes
+
+networks:
+  control:
+    driver: bridge
+
+volumes:
+  postgres-coder-data:
+  postgres-onboarding-data:
+  coder-data:
+
+services:
+  postgres-coder:
+    image: postgres:17
+    container_name: postgres-coder
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coder
+      POSTGRES_PASSWORD: coder
+      POSTGRES_DB: coder
+    volumes:
+      - postgres-coder-data:/var/lib/postgresql/data
+    networks:
+      - control
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coder -d coder"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres-onboarding:
+    image: postgres:17-alpine
+    container_name: postgres-onboarding
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${ONBOARDING_DB_USER:-onboarding}
+      POSTGRES_PASSWORD: ${ONBOARDING_DB_PASSWORD:-onboarding}
+      POSTGRES_DB: ${ONBOARDING_DB_NAME:-onboarding}
+    ports:
+      - "${ONBOARDING_DB_PORT:-5544}:5432"
+    volumes:
+      - postgres-onboarding-data:/var/lib/postgresql/data
+    networks:
+      - control
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ONBOARDING_DB_USER:-onboarding} -d ${ONBOARDING_DB_NAME:-onboarding}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  coder:
+    image: ghcr.io/coder/coder:latest
+    container_name: coder
+    restart: unless-stopped
+    # macOS docker.sock perms gotcha: run as root so Coder can talk to the host docker daemon
+    user: root
+    depends_on:
+      postgres-coder:
+        condition: service_healthy
+    environment:
+      CODER_PG_CONNECTION_URL: postgres://coder:coder@postgres-coder:5432/coder?sslmode=disable
+      CODER_HTTP_ADDRESS: 0.0.0.0:7080
+      # Workspace containers (running on host docker daemon) reach Coder via host.docker.internal
+      CODER_ACCESS_URL: ${CODER_ACCESS_URL:-http://host.docker.internal:7080}
+      CODER_WILDCARD_ACCESS_URL: ""
+      # First user env vars are referenced by scripts/bootstrap-coder.sh (task #4)
+      CODER_FIRST_USER_EMAIL: ${CODER_FIRST_USER_EMAIL:-admin@local.dev}
+      CODER_FIRST_USER_USERNAME: ${CODER_FIRST_USER_USERNAME:-admin}
+      CODER_FIRST_USER_PASSWORD: ${CODER_FIRST_USER_PASSWORD:-Sup3rSecret!}
+      CODER_TELEMETRY_ENABLE: "false"
+    ports:
+      - "${CODER_HTTP_PORT:-7080}:7080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - coder-data:/home/coder/.config
+    networks:
+      - control
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
