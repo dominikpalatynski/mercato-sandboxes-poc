@@ -2,7 +2,23 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  AppWindow,
+  Code2,
+  Copy,
+  Info,
+  Loader,
+  LayoutDashboard,
+  Loader2,
+  Terminal,
+  type LucideIcon,
+} from 'lucide-react';
+
 import StatusBadge from '@/components/status-badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 export interface SandboxView {
   id: string;
@@ -34,27 +50,17 @@ interface LinkSpec {
   label: string;
   subtitle: string;
   url: string | null;
+  icon: LucideIcon;
 }
 
-export default function StatusPoller({ initial, coderEmail, coderTempPassword }: Props) {
+export default function StatusPoller({ initial }: Props) {
+  // coderEmail / coderTempPassword are still accepted via props for API
+  // back-compat — the credentials panel is hidden in the UI for now.
   const router = useRouter();
   const [sandbox, setSandbox] = useState<SandboxView>(initial);
-  const [credsDismissed, setCredsDismissed] = useState<boolean>(false);
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const [copyState, setCopyState] = useState<'idle' | 'id'>('idle');
   const [deleting, setDeleting] = useState(false);
   const stoppedRef = useRef(false);
-
-  // sessionStorage (NOT localStorage): the panel reappears on a fresh page
-  // load so users can re-grab the temp password if they need it again.
-  useEffect(() => {
-    try {
-      const flag = window.sessionStorage.getItem(`sandbox-creds-dismissed:${initial.id}`);
-      if (flag === '1') setCredsDismissed(true);
-    } catch {
-      /* ignore */
-    }
-  }, [initial.id]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -92,25 +98,18 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
     };
   }, [initial.id, initial.status]);
 
-  const dismissCreds = useCallback(() => {
-    try {
-      window.sessionStorage.setItem(`sandbox-creds-dismissed:${initial.id}`, '1');
-    } catch {
-      /* ignore */
-    }
-    setCredsDismissed(true);
-  }, [initial.id]);
-
-  const onCopy = useCallback(async () => {
-    if (!coderTempPassword) return;
-    try {
-      await navigator.clipboard?.writeText(coderTempPassword);
-      setCopyState('copied');
-      setTimeout(() => setCopyState('idle'), 1_500);
-    } catch {
-      /* ignore */
-    }
-  }, [coderTempPassword]);
+  const copyToClipboard = useCallback(
+    async (value: string, kind: 'id') => {
+      try {
+        await navigator.clipboard?.writeText(value);
+        setCopyState(kind);
+        setTimeout(() => setCopyState('idle'), 1_500);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
 
   const onDeleteAndRetry = useCallback(async () => {
     setDeleting(true);
@@ -127,126 +126,154 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
   }, [sandbox.coder_owner_name, sandbox.coder_workspace_name]);
 
   const links: LinkSpec[] = [
-    { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url },
-    { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url },
-    { label: 'Open Mercato App', subtitle: 'Direct port (3000)', url: sandbox.app_url },
-    { label: 'Open Splash', subtitle: 'Build progress (4000)', url: sandbox.splash_url },
-    { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl },
+    { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url, icon: Code2 },
+    { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url, icon: Terminal },
+    { label: 'Open Mercato App', subtitle: 'Direct port (3000)', url: sandbox.app_url, icon: AppWindow },
+    { label: 'Open Splash', subtitle: 'Build progress (4000)', url: sandbox.splash_url, icon: Loader },
+    { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl, icon: LayoutDashboard },
   ];
 
+  const truncatedId = `${initial.id.slice(0, 8)}…${initial.id.slice(-4)}`;
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <StatusBadge status={sandbox.status} />
-        {sandbox.status === 'building' && (
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-transparent" />
-        )}
-        {sandbox.status_message && (
-          <span className="text-sm text-gray-400">{sandbox.status_message}</span>
-        )}
+    <div className="space-y-8">
+      {/* Header strip */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1.5">
+          <h1 className="font-mono text-3xl font-semibold tracking-tight">
+            {sandbox.name}
+          </h1>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono">id: {truncatedId}</span>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(initial.id, 'id')}
+              className="inline-flex h-6 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+              aria-label="Copy full sandbox id"
+            >
+              <Copy className="h-3 w-3" />
+              {copyState === 'id' ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={sandbox.status} />
+        </div>
       </div>
 
+      {/* Ready state */}
       {sandbox.status === 'ready' && (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {links.map((l) => (
-              <a
-                key={l.label}
-                href={l.url ?? '#'}
-                target="_blank"
-                rel="noopener"
-                aria-disabled={!l.url}
-                className={`flex min-h-14 flex-col items-start justify-center rounded-lg border p-4 text-left transition ${
-                  l.url
-                    ? 'border-slate-700/50 bg-slate-900/40 hover:bg-slate-800/50'
-                    : 'cursor-not-allowed border-slate-800 bg-slate-900/20 opacity-60'
-                }`}
-              >
-                <span
-                  className={`text-base font-medium ${l.url ? 'text-gray-100' : 'text-gray-500'}`}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {links.map((l) => {
+              const Icon = l.icon;
+              const disabled = !l.url;
+              const cardClass = cn(
+                'block min-h-32 rounded-lg border bg-card p-5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                disabled
+                  ? 'cursor-not-allowed border-border/60 opacity-60'
+                  : 'border-border hover:border-primary/40 hover:shadow-glow',
+              );
+              const content = (
+                <div className="flex h-full items-start gap-4">
+                  <span
+                    className={cn(
+                      'flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary',
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-base font-semibold text-foreground">
+                      {l.label}
+                    </span>
+                    <span className="mt-1 text-sm text-muted-foreground">
+                      {l.subtitle}
+                    </span>
+                  </div>
+                </div>
+              );
+              return disabled ? (
+                <div key={l.label} className={cardClass}>
+                  {content}
+                </div>
+              ) : (
+                <a
+                  key={l.label}
+                  href={l.url ?? '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cardClass}
                 >
-                  {l.label}
-                </span>
-                <span className="mt-0.5 text-xs text-gray-400">{l.subtitle}</span>
-              </a>
-            ))}
+                  {content}
+                </a>
+              );
+            })}
           </div>
 
-          <p className="text-xs text-gray-400">
-            VS Code is ready immediately. The Mercato app on port 3000 takes 3-7 minutes to finish
-            building on first start - watch the splash for progress.
-          </p>
+          {/* Info note */}
+          <div className="flex items-start gap-3 rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
+            <p>
+              VS Code is ready immediately. The Mercato app on port 3000
+              takes 3-7 minutes to finish building on first start — watch
+              the splash for progress.
+            </p>
+          </div>
 
-          {!credsDismissed && coderTempPassword && (
-            <div className="rounded-lg border border-yellow-700/30 bg-yellow-950/20 p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-yellow-100">Coder credentials</h2>
-                <button
-                  type="button"
-                  onClick={dismissCreds}
-                  className="text-xs text-yellow-200/80 hover:text-white"
-                >
-                  Dismiss
-                </button>
-              </div>
-              <p className="mb-3 text-xs text-yellow-100/70">
-                If Coder asks you to log in when opening the workspace, use these credentials. They
-                are shown once — write them down or copy now.
-              </p>
-              <dl className="space-y-2 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-yellow-100/70">Email</dt>
-                  <dd className="font-mono text-yellow-50">{coderEmail}</dd>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-yellow-100/70">Temp password</dt>
-                  <dd className="flex items-center gap-2">
-                    <code className="rounded bg-black/40 px-2 py-0.5 font-mono text-yellow-50">
-                      {showPassword ? coderTempPassword : '•'.repeat(coderTempPassword.length)}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="rounded border border-yellow-700/40 px-2 py-0.5 text-xs text-yellow-100 hover:bg-yellow-900/40"
-                    >
-                      {showPassword ? 'hide' : 'show'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onCopy}
-                      className="rounded border border-yellow-700/40 px-2 py-0.5 text-xs text-yellow-100 hover:bg-yellow-900/40"
-                    >
-                      {copyState === 'copied' ? 'Copied!' : 'Copy'}
-                    </button>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          )}
         </>
       )}
 
+      {/* Failed state */}
       {sandbox.status === 'failed' && (
-        <div className="space-y-3">
-          <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-            {sandbox.status_message || 'Workspace provisioning failed.'}
+        <Card className="border-destructive/40 bg-destructive/5">
+          <div className="flex flex-row items-center gap-2 p-6 pb-3">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <h2 className="text-base font-semibold leading-none">
+              Provisioning failed
+            </h2>
           </div>
-          <button
-            type="button"
-            onClick={onDeleteAndRetry}
-            disabled={deleting}
-            className="rounded bg-indigo-500 px-4 py-2 font-medium text-white hover:bg-indigo-400 disabled:opacity-60"
-          >
-            {deleting ? 'Deleting…' : 'Delete and retry'}
-          </button>
-        </div>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-foreground">
+              {sandbox.status_message || 'Workspace provisioning failed.'}
+            </p>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={onDeleteAndRetry}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Delete and retry'}
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
+      {/* Building / pending state */}
       {sandbox.status !== 'ready' && sandbox.status !== 'failed' && (
-        <p className="text-sm text-gray-400">
-          Provisioning typically takes 2-4 minutes. This page polls every 3 seconds and will update
-          automatically.
-        </p>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <div className="space-y-1.5">
+              <h2 className="text-xl font-semibold">
+                Provisioning your sandbox
+              </h2>
+              {sandbox.status_message && (
+                <p className="text-sm text-muted-foreground">
+                  {sandbox.status_message}
+                </p>
+              )}
+            </div>
+            <div className="h-1 w-full max-w-xs overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-gradient" />
+            </div>
+            <p className="max-w-md text-xs text-muted-foreground">
+              This usually takes 30-60 seconds. The Mercato app inside
+              continues building for another 3-7 minutes after that. The
+              page polls every 3 seconds and updates automatically.
+            </p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

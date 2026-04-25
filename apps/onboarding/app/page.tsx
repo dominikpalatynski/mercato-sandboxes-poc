@@ -156,43 +156,6 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-border pt-8">
-        <div className="flex flex-col items-center justify-between gap-4 text-sm text-muted-foreground sm:flex-row">
-          <p>© 2026 Mercato Sandboxes • POC</p>
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/terms"
-              className="hover:text-foreground hover:underline underline-offset-4"
-            >
-              Terms
-            </Link>
-            <Link
-              href="/privacy"
-              className="hover:text-foreground hover:underline underline-offset-4"
-            >
-              Privacy
-            </Link>
-            <Link
-              href="/login"
-              className="hover:text-foreground hover:underline underline-offset-4"
-            >
-              Log in
-            </Link>
-          </nav>
-          <p>
-            Powered by{' '}
-            <a
-              href="https://hackon.openmercato.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-foreground hover:underline underline-offset-4"
-            >
-              Open Mercato
-            </a>
-          </p>
-        </div>
-      </footer>
     </div>
   );
 }

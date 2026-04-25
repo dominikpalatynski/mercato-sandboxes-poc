@@ -1,7 +1,10 @@
 import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { notFound } from 'next/navigation';
+
 import { requireSession } from '@/lib/auth';
 import { query } from '@/lib/db';
+import { Button } from '@/components/ui/button';
 import StatusPoller, { type SandboxView } from './status-poller';
 
 interface SandboxRow {
@@ -65,17 +68,13 @@ export default async function SandboxDetailPage({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{sandbox.name}</h1>
-          <p className="text-xs text-gray-400">id: {sandbox.id}</p>
-        </div>
-        <Link href="/dashboard" className="text-sm text-indigo-300 hover:underline">
+    <div className="mx-auto max-w-5xl space-y-8 px-0 py-2 md:px-2">
+      <Button variant="ghost" size="sm" asChild className="self-start">
+        <Link href="/dashboard">
+          <ArrowLeft className="h-4 w-4" />
           Back to dashboard
         </Link>
-      </div>
-
+      </Button>
       <StatusPoller
         initial={initial}
         coderEmail={user?.email ?? session.email}
