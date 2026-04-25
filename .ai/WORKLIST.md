@@ -54,6 +54,25 @@ Working surfaces:
     `create-mercato-app` if it is not already a repo.
   - Make interactive shells start in `/home/coder/app` by default so users land
     directly in the app folder.
+- Create a security-hardening spec for the whole onboarding app and sandbox
+  runtime:
+  - Review personal-data handling and decide whether database fields containing
+    personal data should be encrypted at rest in the onboarding database.
+  - Review impersonation risks between onboarding users, Coder users, and
+    workspace owners.
+  - Verify auth cookies and session checks on every app route, API route, and
+    Coder-login handoff path.
+  - Verify users cannot access, delete, start, stop, or view logs/stats for
+    another user's sandbox.
+  - Verify Coder session token creation cannot be abused for cross-user access.
+  - Review cookie domain, `HttpOnly`, `Secure`, `SameSite`, expiry, logout, and
+    stale-token clearing behavior.
+  - Review sandbox isolation boundaries: Coder workspace ownership, workspace
+    container names/networks, per-workspace Postgres, volumes, wildcard app
+    access, and terminal/VS Code access.
+  - Add tests for every hardening change: unit tests for authorization helpers,
+    API tests for cross-user denial, and Playwright checks for user isolation
+    where practical.
 - Trust `.runtime/tls/sandbox-lvh-me.crt` in the local OS/browser keychain to remove privacy warnings.
 - For production, replace the generated local cert with a real wildcard cert covering:
   - `${SANDBOX_DOMAIN}`
