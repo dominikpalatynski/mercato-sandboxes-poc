@@ -1,14 +1,31 @@
-# Mercato Sandboxes POC
+<p align="center">
+  <a href="https://hackon.openmercato.com">
+    <img src="https://hackon.openmercato.com/logo.svg" alt="Open Mercato" width="320" />
+  </a>
+</p>
 
-See [SPEC.md](./SPEC.md) for the design rationale.
+<h1 align="center">Mercato Sandboxes</h1>
 
-## What this is
+<p align="center">
+  <strong>Self-hosted onboarding tool that provisions Open Mercato dev environments<br/>in Coder workspaces — one click per signup.</strong>
+</p>
 
-A sign-up tool that provisions a self-hosted Coder workspace running an Open Mercato dev environment per signup. A user signs up at `http://localhost:3000`, clicks **Create sandbox**, and gets a workspace with browser-based VS Code, a web terminal, the Mercato app, and the Mercato build splash.
+<p align="center">
+  <a href="#-quick-start"><img src="https://img.shields.io/badge/quick%20start-3%20commands-B4F372?style=flat-square" alt="Quick start"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-BC9AFF?style=flat-square" alt="AGPL-3.0"></a>
+  <img src="https://img.shields.io/badge/Coder-self--hosted-EEFB63?style=flat-square" alt="Coder">
+  <img src="https://img.shields.io/badge/Open%20Mercato-develop-B4F372?style=flat-square" alt="Open Mercato develop">
+</p>
 
-## Architecture
+---
 
-```
+## 🌍 What is this
+
+A signup tool that provisions a self-hosted Coder workspace running an Open Mercato dev environment per signup. A user signs up at the onboarding UI, clicks **Create sandbox**, and lands in a fresh workspace with browser-based VS Code, a web terminal, the live build splash, and direct port forwards to the running Mercato app. Every workspace ships with the **opencode**, **codex**, and **claude code** CLIs preinstalled, so AI-assisted edits work out of the box.
+
+## 🧱 Architecture
+
+```text
 ┌────────────────────── docker compose (host) ──────────────────────┐
 │                                                                   │
 │  postgres-onboarding   postgres-coder    coder-server             │
@@ -18,7 +35,6 @@ A sign-up tool that provisions a self-hosted Coder workspace running an Open Mer
 │  next-onboarding (3000) ──────┼──────────────┘                    │
 │         │ admin API token                                         │
 │         │                                                         │
-│         │                                                         │
 │  bind-mount: /var/run/docker.sock ──────────────────────────────► │
 │         (coder-server uses host Docker daemon to spawn workspaces)│
 └───────────────────────────────────────────────────────────────────┘
@@ -26,115 +42,124 @@ A sign-up tool that provisions a self-hosted Coder workspace running an Open Mer
                               ▼
        Workspace container (one per signup, mercato-workspace:latest):
          - node 24, yarn 4, code-server, postgres-client, git
+         - opencode + codex + claude code CLIs on PATH
          - sidecar postgres (pgvector pg17) on a private docker network
          - on first start: npx create-mercato-app@develop, yarn setup
          - splash on :4000, app on :3000, code-server on :13337
          - 16 GB RAM, 4 vCPU
 ```
 
-- `postgres-onboarding` — postgres:17-alpine; stores the onboarding app's user + sandbox tables.
-- `postgres-coder` — postgres:17; Coder control-plane metadata DB.
-- `coder` — ghcr.io/coder/coder; Coder server on `:7080`, drives Docker via the host socket.
-- `onboarding` — Next.js 15 app on `:3000`; signup, dashboard, sandbox provisioning UI.
-- `mercato-workspace:latest` — built locally; per-signup workspace image with code-server, node 24, yarn 4, build deps.
+| Service               | Image                            | Purpose                                                  |
+|-----------------------|----------------------------------|----------------------------------------------------------|
+| `postgres-onboarding` | `postgres:17-alpine`             | Onboarding app's user + sandbox tables                   |
+| `postgres-coder`      | `postgres:17`                    | Coder control-plane metadata DB                          |
+| `coder`               | `ghcr.io/coder/coder:latest`     | Coder server on `:7080`; spawns workspaces via host Docker |
+| `onboarding`          | `node:24-alpine` (custom build)  | Next.js 15 signup + dashboard UI on `:3000`              |
 
-## Prereqs
+## 🎯 What you get per signup
 
-- Docker Desktop with at least **16 GB RAM** allocated and **~15 GB** free disk.
-- bash, jq, curl on the host shell.
-- macOS or Linux. Apple Silicon supported — every image used has a `linux/arm64` variant.
+- 🖥️ Browser-based **VS Code** (code-server)
+- 💻 Web **terminal**
+- ⚙️ Live **build splash** on port 4000
+- 🚀 The Mercato **app** on port 3000 (direct port forward — no path-prefix issues)
+- 🤖 **opencode**, **codex**, and **claude code** CLIs preinstalled
+- 🐘 Sidecar **PostgreSQL 17 (pgvector)**
+- 💪 **16 GB RAM** allocation per workspace
 
-## Quick start
+## ⚡ Quick start
 
-```
-cp .env.example .env
-./start.sh
-```
-
-Then open `http://localhost:3000`.
-
-The **first** run takes ~3 minutes (Coder boots, the workspace image builds, the template gets uploaded and pushed). Subsequent `./start.sh` runs are idempotent and finish in ~30 seconds.
-
-## Logging in
-
-- **Coder admin** — http://localhost:7080 — `admin@local.dev` / `Sup3rSecret!`
-- **Onboarding** — http://localhost:3000 — sign up with any email and any 8+ character password.
-
-## End-user flow
-
-- Open `http://localhost:3000`, click **Sign up**, enter email + password.
-- Land on `/dashboard`. Click **Create sandbox**, give it a name, submit.
-- Land on the sandbox status page. It polls every 3 seconds.
-- Within ~30–60 seconds the status flips to **ready** and four buttons appear:
-  - **Open in VS Code** — code-server with the scaffolded Mercato project.
-  - **Open Terminal** — Coder's web terminal inside the workspace.
-  - **Open Mercato Splash** — port 4000, the live build-progress page.
-  - **Open Mercato App** — port 3000, the running Mercato app.
-
-## What "ready" means
-
-The Coder workspace agent reports `lifecycle_state: ready` as soon as the startup script returns. We launch `yarn setup` in the background, so:
-
-- **VS Code** (code-server on :13337) — usable the moment the sandbox shows ready (~30–60s).
-- **Mercato Splash** (port 4000) — the Mercato build-progress page; available immediately when the sandbox shows ready.
-- **Mercato App** (port 3000) — takes another **3–7 minutes** on first start while `yarn install`, `generate`, `db migrate`, `initialize`, and the Next.js compile finish. The button will return **502** until Next.js prints `Ready in Xms`. Watch the splash for live progress.
-
-## Resetting
-
-- `./stop.sh` — `docker compose down`. Containers are removed; volumes (Coder DB, onboarding DB, every workspace home) are preserved. `./start.sh` afterwards is fast.
-- `./reset.sh` — `docker compose down -v` plus removal of `.runtime/`. **Wipes all data** including every provisioned sandbox. Irreversible.
-
-## Tests
-
-```
-make test
+```bash
+cp .env.example .env       # set OPENAI_API_KEY (and optionally ANTHROPIC_API_KEY)
+./start.sh                 # ~3 min on first run, ~30 s afterwards
+open http://localhost:3000 # sign up and create your sandbox
 ```
 
-Runs the Playwright suite in `e2e/`. The stack must already be up (`./start.sh`). The suite signs up a fresh user, creates a sandbox, and waits for `ready`; takes 1–3 minutes.
+> **First run takes ~3 min** — Coder has to boot, the workspace image has to build, and the template has to be pushed. Subsequent `./start.sh` runs are idempotent and finish in ~30 s.
 
-## Troubleshooting
+## 🔑 Logging in
 
-- **`coder` container restart-loops** — `docker logs coder`. Usually `host.docker.internal` resolution; the compose file sets `extra_hosts: host.docker.internal:host-gateway` to fix this on Linux.
-- **Workspace stuck "building" forever** — find the workspace and sidecar containers and check their logs:
-  ```
-  docker ps --format '{{.Names}}' | grep coder-
-  docker logs coder-<owner>-<workspace>
-  docker logs coder-<workspace_id>-postgres
-  ```
-- **Port 5544 in use** — the spec mentions 5544 but we expose `postgres-onboarding` on **5545** to avoid the collision. If 5545 is also taken, change `ONBOARDING_DB_PORT` in `.env`.
-- **Port 3000 in use** — the onboarding container claims host `:3000`. The Mercato app inside each workspace also listens on `:3000` but is reached through the Coder reverse proxy (`/@user/<workspace>/apps/app`), so there is no host conflict.
-- **`tar -- no such option` on Linux** — install GNU tar. macOS BSD tar works fine because we run `tar` inside containers via `docker exec`, so this should not bite in practice.
-- **Disk full** — `./reset.sh` then `docker system prune -a --volumes`.
+- **Onboarding** (your users) — http://localhost:3000 — any email + 8+ character password.
+- **Coder admin** (operators) — http://localhost:7080 — `admin@local.dev` / `Sup3rSecret!`.
 
-## Project layout
+## 🧭 End-user flow
 
+1. Sign up at http://localhost:3000.
+2. Land on the dashboard.
+3. Click **Create sandbox**, give it a name, submit.
+4. Wait ~30–60 s for status to flip to **ready**.
+5. Click into **VS Code**, **Terminal**, **Splash**, or **App**.
+
+## ⏱️ "Ready" semantics
+
+The Coder agent reports `ready` as soon as the startup script returns, so the **splash** and **VS Code** are usable immediately. The Mercato **app** on port 3000 takes another **3–7 minutes** on first start while `yarn install`, `generate`, `db migrate`, `initialize`, and the Next.js compile finish — the app URL returns 502 until Next.js prints `Ready in Xms`. Watch the splash for live progress.
+
+## 🤖 AI CLIs
+
+`opencode`, `codex`, and `claude` are on PATH inside every workspace terminal. Set `OPENAI_API_KEY` and (optionally) `ANTHROPIC_API_KEY` in `.env` **before** running `./start.sh` so the template picks them up. If you change the keys later, rerun:
+
+```bash
+bash scripts/push-template.sh
 ```
+
+Workspaces created **before** the keys were set will not have them — recreate those workspaces from the onboarding UI.
+
+## 🛠️ Development
+
+```bash
+make ps      # show stack containers
+make logs    # tail compose logs
+make stop    # docker compose down (preserves volumes)
+make reset   # docker compose down -v + wipe .runtime/ (irreversible)
+make test    # run the Playwright happy-path suite
+```
+
+## 🧪 Tests
+
+`make test` runs the Playwright happy-path suite in `e2e/`. The stack must already be up (`./start.sh`). Takes ~50 s with warm caches.
+
+## 🩺 Troubleshooting
+
+- **Coder restart-looping** → `docker logs coder` (usually `host.docker.internal` resolution).
+- **Workspace stuck on "building"** → `docker logs coder-<owner>-<workspace>` and `docker logs coder-<workspace_id>-postgres`.
+- **Port 5544 in use** → we now default to **5545** (orphan postgres detection); override via `ONBOARDING_DB_PORT` in `.env`.
+- **Disk full** → `./reset.sh && docker system prune -a --volumes`.
+
+## 📁 Project layout
+
+```text
 .
-├── SPEC.md                  Design spec
-├── README.md                This file
-├── docker-compose.yml       postgres-onboarding, postgres-coder, coder, onboarding
-├── start.sh / stop.sh / reset.sh   Lifecycle scripts
-├── Makefile                 start | stop | reset | ps | logs | config | test
-├── .env.example             Copy to .env before first start
-├── .runtime/                Generated: coder admin token, template id (gitignored)
-├── scripts/
-│   ├── bootstrap-coder.sh   First admin + long-lived API token
-│   ├── build-workspace-image.sh   Builds mercato-workspace:latest
-│   ├── push-template.sh     Uploads coder/template, promotes to `mercato`
-│   └── migrate-onboarding.sh   Applies apps/onboarding/db/schema.sql
+├── apps/onboarding/      Next.js 15 signup + dashboard + sandbox UI
 ├── coder/
-│   ├── workspace-image/Dockerfile   node 24 + code-server + build deps
-│   └── template/main.tf     Terraform: agent + sidecar pgvector + workspace
-├── apps/onboarding/         Next.js 15 + TS + Tailwind + pg + jose + bcryptjs
-│   ├── app/                 Routes (signup, login, dashboard, sandboxes)
-│   ├── lib/                 db, auth, coder API wrapper
-│   └── db/schema.sql        users + sandboxes tables
-└── e2e/                     Playwright suite (`make test`)
+│   ├── template/         Terraform: agent + sidecar pgvector + workspace
+│   └── workspace-image/  Dockerfile for mercato-workspace:latest
+├── scripts/              bootstrap-coder, build-workspace-image, push-template, migrate-onboarding
+├── e2e/                  Playwright happy-path suite
+├── docker-compose.yml    postgres-onboarding, postgres-coder, coder, onboarding
+├── start.sh / stop.sh / reset.sh
+├── Makefile
+└── SPEC.md               Full design spec
 ```
 
-## Out of scope (POC)
+## 🚫 Out of scope (POC)
 
 - Email delivery (we surface the temp Coder password on screen rather than emailing).
 - Multi-tenancy / orgs in Coder (single default org).
 - Wildcard subdomain URLs (we use path-based; HMR may be flaky for the Mercato app, but the splash and code-server work fine and the app loads).
 - Production hardening (TLS, secret management, OIDC).
+
+## 📜 License
+
+This project is licensed under the [AGPL-3.0](LICENSE) — the same license as [Coder](https://github.com/coder/coder). [Open Mercato](https://github.com/open-mercato/open-mercato) itself is licensed by its maintainers separately.
+
+## 🙏 Credits
+
+- [Coder](https://github.com/coder/coder) — workspace runtime
+- [Open Mercato](https://github.com/open-mercato/open-mercato) — modular ERP foundation
+- [Next.js](https://nextjs.org/) + [shadcn/ui](https://ui.shadcn.com/) — onboarding UI
+- [Playwright](https://playwright.dev/) — E2E tests
+
+---
+
+<p align="center">
+  <sub>Built for learning AI-assisted engineering at scale. Powered by <a href="https://hackon.openmercato.com">Open Mercato</a>.</sub>
+</p>
