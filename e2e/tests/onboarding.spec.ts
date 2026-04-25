@@ -43,8 +43,14 @@ test.describe.serial('mercato sandbox onboarding', () => {
   test('1. signup -> dashboard', async ({ page, context }) => {
     await page.goto('/signup');
 
+    // The redesigned signup form requires first/last name + a terms checkbox
+    // before the submit button is enabled.
+    await page.locator('#first_name').fill('E2E');
+    await page.locator('#last_name').fill('Tester');
     await page.locator('input[type="email"]').fill(email);
     await page.locator('input[type="password"]').fill(PASSWORD);
+    // shadcn Checkbox renders as a button[role=checkbox]; click it to toggle.
+    await page.locator('#accept_terms').click();
     await page.getByRole('button', { name: /create account/i }).click();
 
     await page.waitForURL('**/dashboard', { timeout: 30_000 });
