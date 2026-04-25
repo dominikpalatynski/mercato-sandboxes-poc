@@ -355,6 +355,15 @@ resource "docker_container" "workspace" {
     ip   = "host-gateway"
   }
 
+  # Make the public Coder hostname resolvable from inside the workspace too,
+  # so the agent can dial home using the same URL the browser sees
+  # (CODER_ACCESS_URL). Without this entry, lvh.me resolves to 127.0.0.1
+  # which is the workspace container's own loopback.
+  host {
+    host = "coder.${var.sandbox_domain}"
+    ip   = "host-gateway"
+  }
+
   volumes {
     container_path = "/home/coder"
     volume_name    = docker_volume.home.name
