@@ -11,6 +11,7 @@ handoff notes live in `.ai/`.
 - Production notes: [.ai/SPEC-PROD.md](.ai/SPEC-PROD.md)
 - Active worklist: [.ai/WORKLIST.md](.ai/WORKLIST.md)
 - Last handoff/root-cause notes: [.ai/HANDOFF.md](.ai/HANDOFF.md)
+- Repo-vendored Codex skill: [.codex/skills/continue-development/SKILL.md](.codex/skills/continue-development/SKILL.md)
 
 ## Operating Rules
 

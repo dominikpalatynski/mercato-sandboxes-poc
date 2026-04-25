@@ -1,0 +1,4 @@
+interface:
+  display_name: "Continue Development"
+  short_description: "Drive spec-first implementation to verified completion."
+  default_prompt: "Continue development from the current repo state: update or create the dated spec, split it into verifiable tasks, execute the tasks, test every change, and record the run in .ai/runs."
