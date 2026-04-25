@@ -5,8 +5,7 @@
 #   - postgres-onboarding  : Onboarding app DB (postgres:17-alpine, host port 5544)
 #   - coder                : Coder control plane (ghcr.io/coder/coder:latest, host port 7080)
 #
-# The onboarding Next.js service (apps/onboarding/) is added in task #5; its build
-# context does not yet exist, so it is intentionally omitted from this compose file.
+# The onboarding Next.js service (apps/onboarding/) builds the user-facing UI on :3000.
 
 name: mercato-sandboxes
 
@@ -96,3 +95,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  onboarding:
+    build: ./apps/onboarding
+    container_name: onboarding
+    restart: unless-stopped
+    depends_on:
+      postgres-onboarding:
+        condition: service_healthy
+      coder:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      POSTGRES_URL: postgres://${ONBOARDING_DB_USER:-onboarding}:${ONBOARDING_DB_PASSWORD:-onboarding}@postgres-onboarding:5432/${ONBOARDING_DB_NAME:-onboarding}
+      JWT_SECRET: ${JWT_SECRET}
+      CODER_URL: http://coder:7080
+      CODER_ADMIN_TOKEN_FILE: /run/secrets/coder-admin-token
+      CODER_TEMPLATE_ID_FILE: /run/secrets/coder-template-id
+    ports:
+      - "${ONBOARDING_HTTP_PORT:-3000}:3000"
+    volumes:
+      - ./.runtime:/run/secrets:ro
+    networks:
+      - control

@@ -17,6 +17,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+REBUILD=0
+for arg in "$@"; do
+  case "$arg" in
+    --rebuild-image) REBUILD=1 ;;
+  esac
+done
+
 # docker compose reads .env natively. We only re-read the few values needed
 # for printing URLs at the end (avoids shell-parsing issues with quoted values).
 read_env() {
@@ -75,10 +82,14 @@ done
 bash scripts/bootstrap-coder.sh
 
 # --- 3. build workspace image (task #2) -------------------------------------
-if [ -f scripts/build-workspace-image.sh ]; then
+MERCATO_WORKSPACE_IMAGE=$(read_env MERCATO_WORKSPACE_IMAGE mercato-workspace:latest)
+if ! docker image inspect "$MERCATO_WORKSPACE_IMAGE" >/dev/null 2>&1; then
+  REBUILD=1
+fi
+if [ "$REBUILD" = "1" ]; then
   bash scripts/build-workspace-image.sh
 else
-  echo "[skip] scripts/build-workspace-image.sh not yet implemented (task #2)"
+  echo "[start] workspace image $MERCATO_WORKSPACE_IMAGE present (use --rebuild-image to force)"
 fi
 
 # --- 4. push Coder template (task #3) ---------------------------------------
@@ -89,14 +100,26 @@ else
 fi
 
 # --- 5. onboarding DB migrations (task #5) ----------------------------------
-if [ -f scripts/migrate-onboarding.sh ]; then
-  bash scripts/migrate-onboarding.sh
-else
-  echo "[skip] scripts/migrate-onboarding.sh not yet implemented (task #5)"
-fi
+bash scripts/migrate-onboarding.sh
 
 # --- 6. onboarding app start (task #5) --------------------------------------
-# Will be added once apps/onboarding/ exists and is wired into docker-compose.yml.
+echo "[start] building + starting onboarding container…"
+docker compose up -d --build onboarding
+
+echo "[start] waiting for onboarding on http://localhost:${ONBOARDING_HTTP_PORT}/login (timeout: 60s)…"
+deadline=$(( $(date +%s) + 60 ))
+while :; do
+  if curl -fsS -o /dev/null "http://localhost:${ONBOARDING_HTTP_PORT}/login"; then
+    echo "[start] onboarding is up."
+    break
+  fi
+  if [ "$(date +%s)" -gt "$deadline" ]; then
+    echo "[start] ERROR: onboarding did not become ready in time" >&2
+    docker compose logs --tail=80 onboarding || true
+    exit 1
+  fi
+  sleep 2
+done
 
 # --- 7. print URLs ----------------------------------------------------------
 cat <<EOF
@@ -105,7 +128,7 @@ cat <<EOF
 
   Coder admin:  http://localhost:${CODER_HTTP_PORT}
                 (admin: ${CODER_FIRST_USER_EMAIL} / ${CODER_FIRST_USER_PASSWORD})
-  Onboarding:   http://localhost:${ONBOARDING_HTTP_PORT}   (added in task #5)
+  Onboarding:   http://localhost:${ONBOARDING_HTTP_PORT}
 
   Onboarding DB: postgres://${ONBOARDING_DB_USER}:${ONBOARDING_DB_PASSWORD}@localhost:${ONBOARDING_DB_PORT}/${ONBOARDING_DB_NAME}
 
