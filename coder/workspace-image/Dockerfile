@@ -39,6 +39,15 @@ RUN mkdir -p "$COREPACK_HOME" \
 
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
+# AI coding CLIs available globally on PATH: opencode, codex, claude.
+# Pinned via npm registry so cache layer is reproducible. Single RUN keeps the
+# resolved npm cache in one layer.
+RUN npm install -g \
+      opencode-ai \
+      @openai/codex \
+      @anthropic-ai/claude-code \
+ && npm cache clean --force
+
 # Non-root coder user (matches Coder agent expectations: uid 1000, passwordless sudo).
 # node:24-bookworm-slim ships with a `node` user at uid 1000 — remove it first.
 RUN userdel -r node 2>/dev/null || true \

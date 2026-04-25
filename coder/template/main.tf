@@ -23,6 +23,26 @@ terraform {
   }
 }
 
+###############################################################################
+# Template-level secrets — forwarded from .env via push-template.sh
+# (`user_variable_values`) and surfaced inside each workspace container as
+# OPENAI_API_KEY / ANTHROPIC_API_KEY for the preinstalled AI CLIs.
+###############################################################################
+
+variable "openai_api_key" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Forwarded to each workspace as OPENAI_API_KEY for opencode/codex CLIs"
+}
+
+variable "anthropic_api_key" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Forwarded as ANTHROPIC_API_KEY for the claude CLI"
+}
+
 # Default docker provider talks to whatever socket the coder container has
 # mounted (we mount /var/run/docker.sock from the host in docker-compose.yml).
 provider "docker" {}
@@ -245,6 +265,8 @@ resource "docker_container" "workspace" {
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
+    "OPENAI_API_KEY=${var.openai_api_key}",
+    "ANTHROPIC_API_KEY=${var.anthropic_api_key}",
   ]
 
   networks_advanced {

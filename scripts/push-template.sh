@@ -166,17 +166,31 @@ fi
 
 # 7. Create template version.
 VERSION_NAME="v-$(date +%s)"
+
+# Build user_variable_values from .env-sourced AI keys. Empty values are
+# OMITTED so terraform's `default = ""` still wins (and we don't accidentally
+# override a previously-set value with an empty string).
+USER_VARS="$(jq -n '[]')"
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  USER_VARS="$(echo "$USER_VARS" | jq --arg v "$OPENAI_API_KEY" '. + [{"name":"openai_api_key","value":$v}]')"
+fi
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  USER_VARS="$(echo "$USER_VARS" | jq --arg v "$ANTHROPIC_API_KEY" '. + [{"name":"anthropic_api_key","value":$v}]')"
+fi
+
 if [ -n "$EXISTING_TEMPLATE_ID" ]; then
   tv_body_in="$(jq -n \
     --arg name "$VERSION_NAME" \
     --arg file_id "$FILE_ID" \
     --arg template_id "$EXISTING_TEMPLATE_ID" \
-    '{name:$name, storage_method:"file", provisioner:"terraform", file_id:$file_id, template_id:$template_id, tags:{}}')"
+    --argjson user_vars "$USER_VARS" \
+    '{name:$name, storage_method:"file", provisioner:"terraform", file_id:$file_id, template_id:$template_id, tags:{}, user_variable_values:$user_vars}')"
 else
   tv_body_in="$(jq -n \
     --arg name "$VERSION_NAME" \
     --arg file_id "$FILE_ID" \
-    '{name:$name, storage_method:"file", provisioner:"terraform", file_id:$file_id, tags:{}}')"
+    --argjson user_vars "$USER_VARS" \
+    '{name:$name, storage_method:"file", provisioner:"terraform", file_id:$file_id, tags:{}, user_variable_values:$user_vars}')"
 fi
 
 echo "[push-template] creating template version ${VERSION_NAME}…"
