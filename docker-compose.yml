@@ -110,6 +110,7 @@ services:
       POSTGRES_URL: postgres://${ONBOARDING_DB_USER:-onboarding}:${ONBOARDING_DB_PASSWORD:-onboarding}@postgres-onboarding:5432/${ONBOARDING_DB_NAME:-onboarding}
       JWT_SECRET: ${JWT_SECRET}
       CODER_URL: http://coder:7080
+      CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-http://localhost:7080}
       CODER_ADMIN_TOKEN_FILE: /run/secrets/coder-admin-token
       CODER_TEMPLATE_ID_FILE: /run/secrets/coder-template-id
     ports:

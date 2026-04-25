@@ -1,6 +1,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 
@@ -58,6 +59,26 @@ export async function requireSession(): Promise<SessionPayload> {
   const s = await getSession();
   if (!s) redirect('/login');
   return s;
+}
+
+/**
+ * Request-aware session check for route handlers. Throws a NextResponse
+ * (401 JSON) when no/invalid session — handlers should:
+ *   try { const s = await requireSessionFromRequest(req); ... }
+ *   catch (resp) { if (resp instanceof NextResponse) return resp; throw resp; }
+ */
+export async function requireSessionFromRequest(req: Request): Promise<SessionPayload> {
+  const cookieHeader = req.headers.get('cookie') || '';
+  const match = cookieHeader.split(/;\s*/).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+  const token = match ? decodeURIComponent(match.slice(SESSION_COOKIE.length + 1)) : '';
+  if (!token) {
+    throw NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const session = await verifySession(token);
+  if (!session) {
+    throw NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return session;
 }
 
 export function sessionCookieOptions() {

@@ -1,9 +1,42 @@
-// Stub for Coder API client. Task #6 will fill these in.
-// Signatures must remain stable so callers (sandbox creation route) can be wired in advance.
+import 'server-only';
+import { readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+
+const CODER_URL = (process.env.CODER_URL || 'http://coder:7080').replace(/\/$/, '');
+const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'http://localhost:7080').replace(/\/$/, '');
+const CODER_ADMIN_TOKEN_FILE = process.env.CODER_ADMIN_TOKEN_FILE || '/run/secrets/coder-admin-token';
+const CODER_TEMPLATE_ID_FILE = process.env.CODER_TEMPLATE_ID_FILE || '/run/secrets/coder-template-id';
+
+function readTrim(path: string, label: string): string {
+  try {
+    const v = readFileSync(path, 'utf8').trim();
+    if (!v) throw new Error(`${label} file is empty: ${path}`);
+    return v;
+  } catch (e) {
+    throw new Error(`Failed to read ${label} from ${path}: ${(e as Error).message}`);
+  }
+}
+
+// Lazy reads — Next.js executes route modules at build time during "Collecting
+// page data". We don't want to fail the build if the secret files are missing
+// in that environment; only fail the first time a route actually calls Coder.
+let _adminToken: string | null = null;
+let _templateId: string | null = null;
+function adminToken(): string {
+  if (_adminToken === null) _adminToken = readTrim(CODER_ADMIN_TOKEN_FILE, 'Coder admin token');
+  return _adminToken;
+}
+function templateId(): string {
+  if (_templateId === null) _templateId = readTrim(CODER_TEMPLATE_ID_FILE, 'Coder template id');
+  return _templateId;
+}
+
+export const coderPublicUrl = CODER_PUBLIC_URL;
 
 export interface CoderUserRef {
   id: string;
   username: string;
+  tempPassword: string;
 }
 
 export interface CoderWorkspaceRef {
@@ -11,7 +44,8 @@ export interface CoderWorkspaceRef {
 }
 
 export interface CoderWorkspaceStatus {
-  jobStatus: string;
+  jobStatus: string;            // pending|running|succeeded|failed|canceled
+  transition: string;           // start|stop|delete
   agentStatus: string | null;
   lifecycleState: string | null;
   ownerName: string;
@@ -20,25 +54,162 @@ export interface CoderWorkspaceStatus {
 
 export interface CoderLinks {
   vscode: string;
-  terminal: string;
   splash: string;
   app: string;
+  terminal: string;
 }
 
-const NOT_IMPL = 'NOT_IMPLEMENTED — task #6 will fill this in';
-
-export async function ensureCoderUser(_email: string, _password: string): Promise<CoderUserRef> {
-  throw new Error(NOT_IMPL);
+export class CoderApiError extends Error {
+  constructor(public readonly status: number, public readonly body: string, message: string) {
+    super(message);
+    this.name = 'CoderApiError';
+  }
 }
 
-export async function createWorkspace(_coderUserId: string, _name: string): Promise<CoderWorkspaceRef> {
-  throw new Error(NOT_IMPL);
+export async function coderFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${CODER_URL}${path}`, {
+    ...init,
+    headers: {
+      'Coder-Session-Token': adminToken(),
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new CoderApiError(res.status, text, `Coder API ${init?.method || 'GET'} ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+  }
+  // Some endpoints (e.g. delete) might be empty
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return undefined as unknown as T;
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function getWorkspaceStatus(_id: string): Promise<CoderWorkspaceStatus> {
-  throw new Error(NOT_IMPL);
+let cachedOrgId: string | null = null;
+async function getOrgId(): Promise<string> {
+  if (cachedOrgId) return cachedOrgId;
+  const me = await coderFetch<{ organization_ids: string[] }>('/api/v2/users/me');
+  if (!me.organization_ids || me.organization_ids.length === 0) {
+    throw new Error('Coder admin user has no organizations');
+  }
+  cachedOrgId = me.organization_ids[0]!;
+  return cachedOrgId;
 }
 
-export function buildLinks(_args: { ownerName: string; name: string }): CoderLinks {
-  throw new Error(NOT_IMPL);
+function usernameFromEmail(email: string): string {
+  const local = email.split('@')[0] || '';
+  let u = local.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (u.length > 32) u = u.slice(0, 32).replace(/-+$/g, '');
+  if (!u) u = 'user';
+  return u;
+}
+
+function generateTempPassword(): string {
+  return randomBytes(12).toString('base64url').slice(0, 16);
+}
+
+function randomSuffix(): string {
+  return randomBytes(3).toString('base64url').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 4) || 'x';
+}
+
+export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
+  const orgId = await getOrgId();
+  const tempPassword = generateTempPassword();
+  let baseUsername = usernameFromEmail(email);
+  let lastErr: unknown = null;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const username = attempt === 0 ? baseUsername : `${baseUsername.slice(0, 27)}-${randomSuffix()}`;
+    try {
+      const body = {
+        email,
+        username,
+        name: email,
+        password: tempPassword,
+        organization_ids: [orgId],
+        login_type: 'password',
+        user_status: 'active',
+      };
+      const created = await coderFetch<{ id: string; username: string }>('/api/v2/users', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return { id: created.id, username: created.username, tempPassword };
+    } catch (e) {
+      lastErr = e;
+      if (e instanceof CoderApiError) {
+        const taken = e.status === 409 || (e.status === 400 && /already taken|exists|in use/i.test(e.body));
+        if (taken) continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error('Failed to create Coder user after retries');
+}
+
+export async function createWorkspace(coderUserId: string, name: string): Promise<CoderWorkspaceRef> {
+  const orgId = await getOrgId();
+  const body = {
+    name,
+    template_id: templateId(),
+    rich_parameter_values: [],
+    automatic_updates: 'never',
+  };
+  const created = await coderFetch<{ id: string }>(
+    `/api/v2/organizations/${orgId}/members/${coderUserId}/workspaces`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+  return { id: created.id };
+}
+
+interface RawWorkspace {
+  name: string;
+  owner_name: string;
+  latest_build: {
+    transition: string;
+    job: { status: string };
+    resources?: Array<{
+      agents?: Array<{ status: string; lifecycle_state: string }>;
+    }>;
+  };
+}
+
+export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStatus> {
+  const ws = await coderFetch<RawWorkspace>(`/api/v2/workspaces/${id}`);
+  const agents = (ws.latest_build.resources ?? []).flatMap((r) => r.agents ?? []);
+  const agent = agents[0];
+  return {
+    jobStatus: ws.latest_build.job.status,
+    transition: ws.latest_build.transition,
+    agentStatus: agent?.status ?? null,
+    lifecycleState: agent?.lifecycle_state ?? null,
+    ownerName: ws.owner_name,
+    name: ws.name,
+  };
+}
+
+export async function deleteWorkspace(id: string): Promise<void> {
+  await coderFetch(`/api/v2/workspaces/${id}/builds`, {
+    method: 'POST',
+    body: JSON.stringify({ transition: 'delete', orphan: false }),
+  });
+}
+
+export function buildLinks(args: {
+  coderPublicUrl: string;
+  ownerName: string;
+  name: string;
+}): CoderLinks {
+  const base = `${args.coderPublicUrl.replace(/\/$/, '')}/@${args.ownerName}/${args.name}`;
+  return {
+    vscode: `${base}/apps/code-server`,
+    splash: `${base}/apps/splash`,
+    app: `${base}/apps/app`,
+    terminal: `${base}/terminal`,
+  };
 }
