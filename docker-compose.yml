@@ -103,9 +103,13 @@ services:
       - coder-data:/home/coder/.config
     networks:
       - control
-    # NOTE: Coder is intentionally NOT behind caddy-docker-proxy. Coder's
-    # web terminal + code-server use long-lived WebSocket connections that
-    # the dev caddy setup mishandles. Accessed directly on host port 7080.
+      - mercato-proxy
+    # Coder is published at coder.sandbox.lvh.me via Caddy (long-lived
+    # WebSockets work because caddy-docker-proxy passes through Upgrade
+    # headers natively). Direct localhost:7080 still works as a fallback.
+    labels:
+      caddy_0: http://coder.${SANDBOX_DOMAIN:-lvh.me}:80
+      caddy_0.reverse_proxy: "{{upstreams 7080}}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

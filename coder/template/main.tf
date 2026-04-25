@@ -358,6 +358,15 @@ resource "docker_container" "workspace" {
     ip   = "host-gateway"
   }
 
+  # The agent dials home using CODER_ACCESS_URL (now coder.sandbox.lvh.me).
+  # lvh.me public DNS resolves to 127.0.0.1, which inside the workspace
+  # container is the container itself. Force-resolve it to the host gateway
+  # so the agent can actually reach the Mac host's port 80 → Caddy → Coder.
+  host {
+    host = "coder.${var.sandbox_domain}"
+    ip   = "host-gateway"
+  }
+
   volumes {
     container_path = "/home/coder"
     volume_name    = docker_volume.home.name
