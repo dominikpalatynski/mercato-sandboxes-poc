@@ -7,7 +7,10 @@ import {
   AppWindow,
   Code2,
   Copy,
+  Eye,
+  EyeOff,
   Info,
+  KeyRound,
   Loader,
   LayoutDashboard,
   Terminal,
@@ -54,14 +57,25 @@ interface LinkSpec {
   icon: LucideIcon;
 }
 
-export default function StatusPoller({ initial }: Props) {
-  // coderEmail / coderTempPassword are still accepted via props for API
-  // back-compat — the credentials panel is hidden in the UI for now.
+export default function StatusPoller({ initial, coderEmail, coderTempPassword }: Props) {
   const router = useRouter();
   const [sandbox, setSandbox] = useState<SandboxView>(initial);
-  const [copyState, setCopyState] = useState<'idle' | 'id'>('idle');
+  const [copyState, setCopyState] = useState<'idle' | 'id' | 'email' | 'password'>('idle');
   const [deleting, setDeleting] = useState(false);
+  const [credsDismissed, setCredsDismissed] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const stoppedRef = useRef(false);
+
+  // sessionStorage (NOT localStorage): the panel reappears on a fresh page
+  // load so users can re-grab the temp password if they need it again.
+  useEffect(() => {
+    try {
+      const flag = window.sessionStorage.getItem(`sandbox-creds-dismissed:${initial.id}`);
+      if (flag === '1') setCredsDismissed(true);
+    } catch {
+      /* ignore */
+    }
+  }, [initial.id]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -100,7 +114,7 @@ export default function StatusPoller({ initial }: Props) {
   }, [initial.id, initial.status]);
 
   const copyToClipboard = useCallback(
-    async (value: string, kind: 'id') => {
+    async (value: string, kind: 'id' | 'email' | 'password') => {
       try {
         await navigator.clipboard?.writeText(value);
         setCopyState(kind);
@@ -111,6 +125,15 @@ export default function StatusPoller({ initial }: Props) {
     },
     [],
   );
+
+  const dismissCreds = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(`sandbox-creds-dismissed:${initial.id}`, '1');
+    } catch {
+      /* ignore */
+    }
+    setCredsDismissed(true);
+  }, [initial.id]);
 
   const onDeleteAndRetry = useCallback(async () => {
     setDeleting(true);
@@ -165,6 +188,81 @@ export default function StatusPoller({ initial }: Props) {
       {/* Ready state */}
       {sandbox.status === 'ready' && (
         <>
+          {/* Coder credentials — only on first visit per session */}
+          {!credsDismissed && coderTempPassword && (
+            <Card className="border-primary/30 bg-primary/5 dark:bg-primary/10">
+              <div className="flex flex-row items-center justify-between gap-2 p-6 pb-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-5 w-5 text-primary" />
+                  <h2 className="text-base font-semibold leading-none">
+                    Coder credentials
+                  </h2>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={dismissCreds}
+                >
+                  Dismiss
+                </Button>
+              </div>
+              <CardContent className="space-y-3">
+                <dl className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-muted-foreground">Email</dt>
+                    <dd className="flex items-center gap-2">
+                      <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
+                        {coderEmail}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(coderEmail, 'email')}
+                        className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+                        aria-label="Copy email"
+                      >
+                        <Copy className="h-3 w-3" />
+                        {copyState === 'email' ? 'Copied!' : 'Copy'}
+                      </button>
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-muted-foreground">Temp password</dt>
+                    <dd className="flex items-center gap-2">
+                      <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
+                        {showPassword ? coderTempPassword : '•'.repeat(Math.min(coderTempPassword.length, 12))}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((s) => !s)}
+                        className="inline-flex h-7 items-center justify-center rounded-sm border border-border px-2 hover:bg-accent hover:text-accent-foreground"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(coderTempPassword, 'password')}
+                        className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+                        aria-label="Copy password"
+                      >
+                        <Copy className="h-3 w-3" />
+                        {copyState === 'password' ? 'Copied!' : 'Copy'}
+                      </button>
+                    </dd>
+                  </div>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  Use these if Coder asks you to log in. The password is shown only this once.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           <WorkspaceStats sandboxId={initial.id} enabled variant="wide" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {links.map((l) => {
