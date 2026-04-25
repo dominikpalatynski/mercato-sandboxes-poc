@@ -284,6 +284,7 @@ export default function ProvisioningConsole({
   const buildAfterRef = useRef(0);
   const agentAfterRef = useRef(0);
   const stoppedRef = useRef(false);
+  const autoSwitchedRef = useRef(false);
 
   const polling = status !== 'ready' && status !== 'failed';
 
@@ -329,6 +330,15 @@ export default function ProvisioningConsole({
     () => deriveStepStates({ jobStatus, lifecycleState, status }),
     [jobStatus, lifecycleState, status],
   );
+
+  useEffect(() => {
+    if (autoSwitchedRef.current) return;
+    if (status === 'failed') return;
+    if (jobStatus === 'succeeded') {
+      autoSwitchedRef.current = true;
+      setTab('agent');
+    }
+  }, [jobStatus, status]);
 
   async function onCancel(): Promise<void> {
     setCancelling(true);

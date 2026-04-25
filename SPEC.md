@@ -26,18 +26,31 @@ clickable links to open it in browser-based VS Code and a web terminal.
 ## 2. Architecture
 
 ```
+                           ▼ host :80 / :443 / :8080 (dashboard)
+┌──────────────────────────┴────────────────────────────────────────┐
+│  traefik (single edge proxy, label-driven)                        │
+│    coder.<DOMAIN>           → coder:7080                          │
+│    <DOMAIN>, app.<DOMAIN>   → onboarding:3000                     │
+│    <ws>.<DOMAIN>            → workspace :3000  (app)              │
+│    <ws>-splash.<DOMAIN>     → workspace :4000  (splash)           │
+│    <ws>-code.<DOMAIN>       → workspace :13337 (code-server)      │
+└──────────────────────────┬────────────────────────────────────────┘
+                           │ (mercato-proxy network — labels discovered
+                           │  via docker-socket-proxy that rewrites
+                           │  /v1.NN/* → /v1.45/* for Docker Desktop
+                           │  4.57+ MinAPIVersion compatibility)
+                           ▼
 ┌────────────────────── docker compose (host) ──────────────────────┐
 │                                                                   │
-│  postgres-onboarding   postgres-coder    coder-server             │
-│  :5544                 :5432 (internal)  :7080                    │
+│  postgres-onboarding   postgres-coder    coder                    │
+│  :5544 (host)          (internal)        (internal)               │
 │         ▲                     ▲              ▲                    │
 │         │                     │              │                    │
-│  next-onboarding (3000) ──────┼──────────────┘                    │
+│  onboarding (next.js) ────────┼──────────────┘                    │
 │         │ admin API token                                         │
 │         │                                                         │
-│         │                                                         │
 │  bind-mount: /var/run/docker.sock ──────────────────────────────► │
-│         (coder-server uses host Docker daemon to spawn workspaces)│
+│         (coder uses host Docker daemon to spawn workspaces)       │
 └───────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -47,17 +60,20 @@ clickable links to open it in browser-based VS Code and a web terminal.
          - on first start: npx create-mercato-app@develop, yarn setup
          - splash on :4000, app on :3000, code-server on :13337
          - 16 GB RAM, 4 vCPU
+         - Traefik labels emit by terraform → app/splash/code subdomains
 ```
 
 ### Components
 
-| Service              | Image / Tech                    | Purpose                                      |
-|----------------------|---------------------------------|----------------------------------------------|
-| `postgres-onboarding`| `postgres:17-alpine`            | Onboarding app's user + sandbox tables       |
-| `postgres-coder`     | `postgres:17`                   | Coder's metadata DB                          |
-| `coder-server`       | `ghcr.io/coder/coder:latest`    | Coder control plane on `:7080`               |
-| `next-onboarding`    | `node:24-alpine` (custom build) | Next.js + TypeScript onboarding UI on `:3000` (host port). NOTE: **mapped to host `3000`**; the Mercato app inside each workspace also uses `:3000` but reached via Coder reverse proxy (`/@user/ws/apps/app`), so no host conflict. |
-| `mercato-workspace`  | custom (node:24-bookworm-slim)  | Image for each sandbox; built by start script|
+| Service                | Image / Tech                                | Purpose                                                                                  |
+|------------------------|---------------------------------------------|------------------------------------------------------------------------------------------|
+| `traefik`              | `traefik:v3.5`                              | Single edge proxy for the whole stack (replaces the old caddy + nginx-coder pair). Discovers routes from docker labels. Dashboard at `:8080/dashboard/` in dev. |
+| `docker-socket-proxy`  | `nginx:alpine` + `proxy/docker-api-shim.conf` | Rewrites `/v1.NN/*` → `/v1.45/*` so Traefik's go-docker client (which hardcodes `v1.24`) works against Docker Desktop 4.57+ engine 29.x (MinAPIVersion 1.44). |
+| `postgres-onboarding`  | `postgres:17-alpine`                        | Onboarding app's user + sandbox tables                                                   |
+| `postgres-coder`       | `postgres:17`                               | Coder's metadata DB                                                                      |
+| `coder`                | `ghcr.io/coder/coder:latest`                | Coder control plane. Internal `:7080`; published by Traefik at `coder.<SANDBOX_DOMAIN>`. |
+| `onboarding`           | `node:24-alpine` (custom build)             | Next.js + TypeScript onboarding UI. Internal `:3000`; published by Traefik at `<SANDBOX_DOMAIN>` and `app.<SANDBOX_DOMAIN>`. |
+| `mercato-workspace`    | custom (`node:24-bookworm-slim`)            | Image for each sandbox; built by start script                                            |
 
 ### Data model (onboarding postgres)
 
@@ -97,15 +113,14 @@ Path: `coder/template/`
 - `main.tf` — Terraform definition:
   - `coder_agent.main` runs the startup script on container boot.
   - `docker_volume.home` for `/home/coder` (persistent across stop/start).
+  - `docker_volume.pg_data` for the sidecar postgres (persistent across stop/start, with `lifecycle.ignore_changes = all` so a template upgrade can never destroy it).
   - `docker_network.workspace` private network so the workspace container and its
     sidecar postgres can reach each other.
   - `docker_container.postgres` — `pgvector/pgvector:pg17-trixie`, attached to the network,
     `POSTGRES_DB=mercato`, `POSTGRES_USER=mercato`, `POSTGRES_PASSWORD=mercato`.
-  - `docker_container.workspace` — image `mercato-workspace:latest`, attached to the same
-    network, memory 16384 MiB, mounts the home volume, gets the agent token, runs the
-    init script with `localhost`→`host.docker.internal` rewrite (mac gotcha).
-  - `coder_app` resources: `code-server` (path-based, healthcheck on 13337), `splash`
-    (path-based, on 4000), `app` (path-based, on 3000).
+  - `docker_container.workspace` — image `mercato-workspace:latest`, attached to **two** networks (private `workspace` for the postgres sidecar, shared `mercato-proxy` for Traefik), memory 16384 MiB, mounts the home volume, gets the agent token, runs the init script with `localhost`→`host.docker.internal` rewrite (mac gotcha). Also adds an `extra_hosts` alias `coder.<SANDBOX_DOMAIN> → host-gateway` so the agent can dial home through Traefik on the host even from inside the workspace's container-loopback world.
+  - **Traefik labels** (built once into `local.workspace_labels` and emitted via a `dynamic "labels"` block) publish three subdomains per workspace: `<ws>.<DOMAIN>` → :3000 (app), `<ws>-splash.<DOMAIN>` → :4000 (splash), `<ws>-code.<DOMAIN>` → :13337 (code-server). The `code` route attaches a per-workspace middleware that strips `Accept-Encoding` upstream + `Sec-WebSocket-Extensions` downstream so neither gzip nor permessage-deflate get negotiated (otherwise code-server's extension host hits `Z_DATA_ERROR`).
+  - `coder_app` resources: `code-server` (path-based via Coder's dashboard, healthcheck on 13337), `splash` (`external = true`, points at the Traefik-published splash subdomain), `app` (`external = true`, points at the Traefik-published app subdomain).
 
 ### Startup script (inside workspace)
 

@@ -2,8 +2,8 @@ import 'server-only';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-const CODER_URL = (process.env.CODER_URL || 'http://coder:7080').replace(/\/$/, '');
-const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'http://localhost:7080').replace(/\/$/, '');
+const CODER_URL = (process.env.CODER_URL || 'http://coder').replace(/\/$/, '');
+const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'http://localhost').replace(/\/$/, '');
 const CODER_ADMIN_TOKEN_FILE = process.env.CODER_ADMIN_TOKEN_FILE || '/run/secrets/coder-admin-token';
 const CODER_TEMPLATE_ID_FILE = process.env.CODER_TEMPLATE_ID_FILE || '/run/secrets/coder-template-id';
 
@@ -400,10 +400,37 @@ export function resolveAppUrl(args: {
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {
+  // Enqueue the delete build. Coder runs terraform destroy asynchronously.
+  // Returning before that finishes meant the workspace name stayed taken on
+  // Coder's side, so an immediate re-create with the same name 409'd.
   await coderFetch(`/api/v2/workspaces/${id}/builds`, {
     method: 'POST',
     body: JSON.stringify({ transition: 'delete', orphan: false }),
   });
+
+  // Poll until the workspace is gone (404) or the build's job ends in a
+  // terminal state. ~60s budget — plenty for terraform destroy of one
+  // workspace + sidecar postgres on local docker.
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    try {
+      const ws = await coderFetch<{ latest_build?: { status?: string; transition?: string } }>(
+        `/api/v2/workspaces/${id}`,
+      );
+      const status = ws.latest_build?.status;
+      const transition = ws.latest_build?.transition;
+      if (transition === 'delete' && (status === 'succeeded' || status === 'failed' || status === 'canceled')) {
+        return;
+      }
+    } catch (e) {
+      if (e instanceof CoderApiError && e.status === 404) return;
+      throw e;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  // Don't throw — caller treats deleteWorkspace failures as non-fatal anyway,
+  // but the DB row deletion will proceed and the user will see the stuck state
+  // if Coder is genuinely wedged.
 }
 
 export function buildLinks(args: {

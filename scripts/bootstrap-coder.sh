@@ -13,7 +13,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CODER_URL="${CODER_URL:-http://localhost:7080}"
+CODER_URL="${CODER_URL:-${CODER_ACCESS_URL:-http://coder.sandbox.lvh.me}}"
 RUNTIME_DIR=".runtime"
 TOKEN_FILE="${RUNTIME_DIR}/coder-admin-token"
 TOKEN_NAME="onboarding-app"

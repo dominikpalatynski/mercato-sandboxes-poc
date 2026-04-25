@@ -54,7 +54,7 @@ const POLL_INTERVAL_MS = 3_000;
 
 // next.config.js inlines this at build time; default keeps local dev sane.
 const CODER_PUBLIC_URL =
-  (process.env.NEXT_PUBLIC_CODER_URL || 'http://localhost:7080').replace(/\/$/, '');
+  (process.env.NEXT_PUBLIC_CODER_URL || 'http://coder.sandbox.lvh.me').replace(/\/$/, '');
 
 interface LinkSpec {
   label: string;
@@ -345,7 +345,11 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
                   </div>
                 </div>
               );
-              const href = l.url ?? '#';
+              const rawHref = l.url ?? '#';
+              const href =
+                !disabled && l.viaCoderLogin && l.url
+                  ? coderLoginHref(initial.id, l.url)
+                  : rawHref;
               return disabled ? (
                 <div key={l.label} className={cardClass}>
                   {content}

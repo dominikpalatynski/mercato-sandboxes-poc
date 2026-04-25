@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
-import { ensureCoderUser, createWorkspace } from '@/lib/coder';
+import { ensureCoderUser, createWorkspace, CoderApiError } from '@/lib/coder';
 
 interface SandboxListRow {
   id: string;

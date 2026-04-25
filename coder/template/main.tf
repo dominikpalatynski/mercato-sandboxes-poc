@@ -5,17 +5,18 @@
 # private docker network. The agent's startup script scaffolds the Mercato
 # app on first boot and runs `yarn setup` on every boot.
 #
-# Networking model (task #14):
-#   * Each workspace container is also attached to the shared `mercato-proxy`
-#     docker network so caddy-docker-proxy can reach :3000 and :4000 by
-#     container alias.
-#   * caddy-docker-proxy reads docker labels to publish two subdomains per
-#     workspace on the host's standard 80/443:
-#         <workspace>.<SANDBOX_DOMAIN>          → app on :3000
-#         <workspace>-splash.<SANDBOX_DOMAIN>   → splash on :4000
+# Networking model:
+#   * Each workspace container is attached to the shared `mercato-proxy`
+#     docker network so Traefik (the single edge proxy declared in
+#     docker-compose.yml) can reach :3000 / :4000 / :13337 by container alias.
+#   * Traefik discovers each workspace via docker labels and publishes:
+#         <workspace>.<SANDBOX_DOMAIN>           → app on :3000
+#         <workspace>-splash.<SANDBOX_DOMAIN>    → splash on :4000
+#         <workspace>-code.<SANDBOX_DOMAIN>      → code-server on :13337
 #     For local dev SANDBOX_DOMAIN defaults to `lvh.me` (resolves to 127.0.0.1
 #     for any subdomain — no /etc/hosts hacks). For prod set it to e.g.
-#     `sandbox.openmercato.com` with a wildcard DNS A record.
+#     `sandbox.openmercato.com` with a wildcard DNS A record + DNS-01 wildcard
+#     cert via Traefik's cloudflare resolver.
 ###############################################################################
 
 terraform {
@@ -62,16 +63,22 @@ variable "sandbox_domain" {
   description = "DNS root under which each workspace gets its own subdomain (e.g. lvh.me for local, sandbox.openmercato.com for prod). lvh.me wildcards to 127.0.0.1, so no DNS / /etc/hosts work needed locally."
 }
 
-variable "caddy_scheme" {
+variable "proxy_scheme" {
   type        = string
   default     = "http"
-  description = "Scheme caddy publishes URLs on (http for local lvh.me dev, https in prod with ACME)."
+  description = "Scheme Traefik publishes URLs on (http for local lvh.me dev, https in prod with ACME)."
 }
 
-variable "caddy_port_suffix" {
+variable "proxy_port_suffix" {
   type        = string
   default     = ""
   description = "Optional port suffix appended to user-facing URLs (e.g. ':8080' if you can't bind 80). Empty for standard 80/443."
+}
+
+variable "traefik_entrypoint" {
+  type        = string
+  default     = "web"
+  description = "Traefik entrypoint name to expose workspace services on. `web` for HTTP-only dev; `websecure` in prod (TLS terminated by Traefik via the cloudflare DNS-01 wildcard cert configured on the entrypoint)."
 }
 
 # Default docker provider talks to whatever socket the coder container has
@@ -94,15 +101,57 @@ data "coder_workspace_owner" "me" {}
 ###############################################################################
 
 locals {
-  app_host    = "${lower(data.coder_workspace.me.name)}.${var.sandbox_domain}"
-  splash_host = "${lower(data.coder_workspace.me.name)}-splash.${var.sandbox_domain}"
-  app_url     = "${var.caddy_scheme}://${local.app_host}${var.caddy_port_suffix}"
-  splash_url  = "${var.caddy_scheme}://${local.splash_host}${var.caddy_port_suffix}"
-  # Caddy site address. Including the explicit scheme + port disables auto-HTTPS
-  # when CADDY_SCHEME=http (otherwise caddy tries to obtain LetsEncrypt certs
-  # for lvh.me etc.). For prod set CADDY_SCHEME=https and ACME just works.
-  app_site_addr    = var.caddy_scheme == "http" ? "http://${local.app_host}:80" : "https://${local.app_host}"
-  splash_site_addr = var.caddy_scheme == "http" ? "http://${local.splash_host}:80" : "https://${local.splash_host}"
+  ws_name     = lower(data.coder_workspace.me.name)
+  app_host    = "${local.ws_name}.${var.sandbox_domain}"
+  splash_host = "${local.ws_name}-splash.${var.sandbox_domain}"
+  code_host   = "${local.ws_name}-code.${var.sandbox_domain}"
+  app_url     = "${var.proxy_scheme}://${local.app_host}${var.proxy_port_suffix}"
+  splash_url  = "${var.proxy_scheme}://${local.splash_host}${var.proxy_port_suffix}"
+  code_url    = "${var.proxy_scheme}://${local.code_host}${var.proxy_port_suffix}"
+
+  # Traefik labels for this workspace. We build a single map and emit it via a
+  # `dynamic "labels"` block on docker_container.workspace below so the schema
+  # stays readable. Naming convention: <ws>-<svc> for routers and services.
+  workspace_labels = {
+    "traefik.enable"             = "true"
+    "traefik.docker.network"     = "mercato-proxy"
+
+    # ---- App on :3000 → <ws>.<domain> -------------------------------------
+    # NB: with >1 service on a single container Traefik can't auto-link the
+    # router → service, so each router must explicitly name its service.
+    "traefik.http.routers.${local.ws_name}-app.rule"                              = "Host(`${local.app_host}`)"
+    "traefik.http.routers.${local.ws_name}-app.entrypoints"                       = var.traefik_entrypoint
+    "traefik.http.routers.${local.ws_name}-app.service"                           = "${local.ws_name}-app"
+    "traefik.http.services.${local.ws_name}-app.loadbalancer.server.port"         = "3000"
+
+    # ---- Splash on :4000 → <ws>-splash.<domain> ---------------------------
+    "traefik.http.routers.${local.ws_name}-splash.rule"                           = "Host(`${local.splash_host}`)"
+    "traefik.http.routers.${local.ws_name}-splash.entrypoints"                    = var.traefik_entrypoint
+    "traefik.http.routers.${local.ws_name}-splash.service"                        = "${local.ws_name}-splash"
+    "traefik.http.services.${local.ws_name}-splash.loadbalancer.server.port"      = "4000"
+
+    # ---- code-server on :13337 → <ws>-code.<domain> -----------------------
+    # Strip Accept-Encoding upstream + Sec-WebSocket-Extensions downstream so
+    # neither gzip nor permessage-deflate get negotiated. Without this,
+    # code-server's extension-host WS stream gets corrupted (Z_DATA_ERROR).
+    "traefik.http.routers.${local.ws_name}-code.rule"                             = "Host(`${local.code_host}`)"
+    "traefik.http.routers.${local.ws_name}-code.entrypoints"                      = var.traefik_entrypoint
+    "traefik.http.routers.${local.ws_name}-code.service"                          = "${local.ws_name}-code"
+    "traefik.http.routers.${local.ws_name}-code.middlewares"                      = "${local.ws_name}-code-noenc@docker"
+    "traefik.http.services.${local.ws_name}-code.loadbalancer.server.port"        = "13337"
+    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customrequestheaders.Accept-Encoding"   = ""
+    # Strip Sec-WebSocket-Extensions in BOTH directions: stripping only the
+    # response confirmation isn't enough — the upstream still encodes frames
+    # as permessage-deflate and the browser barfs (Z_DATA_ERROR / RSV1).
+    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customrequestheaders.Sec-WebSocket-Extensions"  = ""
+    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customresponseheaders.Sec-WebSocket-Extensions" = ""
+
+    # ---- Coder bookkeeping (preserved from the previous template) ---------
+    "coder.owner"          = data.coder_workspace_owner.me.name
+    "coder.owner_id"       = data.coder_workspace_owner.me.id
+    "coder.workspace_id"   = data.coder_workspace.me.id
+    "coder.workspace_name" = data.coder_workspace.me.name
+  }
 }
 
 ###############################################################################
@@ -154,8 +203,14 @@ resource "coder_agent" "main" {
     fi
 
     # 3. always: launch dev (yarn setup is idempotent — runs migrate + initialize, then dev)
+    # Export APP_URL/NEXT_PUBLIC_APP_URL into the dev process's shell env so
+    # next.config.ts (PR open-mercato#1592) sees them at config-load time —
+    # .env alone isn't enough because mercato's dev launcher spawns next in a
+    # child process whose process.env lacks the .env-only vars at that phase.
     cd "$HOME/app"
-    nohup yarn setup >/tmp/mercato-dev.log 2>&1 &
+    export APP_URL="${local.app_url}"
+    export NEXT_PUBLIC_APP_URL="${local.app_url}"
+    nohup env APP_URL="${local.app_url}" NEXT_PUBLIC_APP_URL="${local.app_url}" yarn setup >/tmp/mercato-dev.log 2>&1 &
   EOT
 
   metadata {
@@ -191,17 +246,15 @@ resource "coder_app" "code-server" {
   agent_id     = coder_agent.main.id
   slug         = "code-server"
   display_name = "VS Code"
-  url          = "http://localhost:13337/?folder=/home/coder/app"
-  icon         = "/icon/code.svg"
-  subdomain    = false
-  share        = "authenticated"
-  open_in      = "tab"
-
-  healthcheck {
-    url       = "http://localhost:13337/healthz"
-    interval  = 5
-    threshold = 6
-  }
+  # external = true → Coder doesn't proxy code-server's WS at all; the browser
+  # hits the workspace directly via Traefik on `<ws>-code.<domain>`. This is
+  # the same model Codespaces uses (VS Code talks directly to the workspace,
+  # not through the control plane), and it avoids permessage-deflate / yamux
+  # double-framing problems that plague any WS-through-proxy chain.
+  external = true
+  url      = "${local.code_url}/?folder=/home/coder/app"
+  icon     = "/icon/code.svg"
+  open_in  = "tab"
 }
 
 resource "coder_app" "splash" {
@@ -342,9 +395,12 @@ resource "docker_container" "workspace" {
   hostname = data.coder_workspace.me.name
   memory   = 16384
 
-  # localhost / 127.0.0.1 inside the agent init script need to point at the
-  # mac host (where Coder is published on :7080), not the container's loopback.
-  entrypoint = ["sh", "-c", replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.docker.internal")]
+  # The agent's init script uses CODER_ACCESS_URL (= http://coder.sandbox.lvh.me)
+  # which Docker DNS resolves to the coder container's IP on mercato-proxy.
+  # Coder listens on :80 inside that container (see CODER_HTTP_ADDRESS in
+  # docker-compose.yml), so the agent reaches it directly without going through
+  # Traefik. No localhost rewrite needed.
+  entrypoint = ["sh", "-c", coder_agent.main.init_script]
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
@@ -358,7 +414,7 @@ resource "docker_container" "workspace" {
     aliases = ["workspace"]
   }
 
-  # Shared proxy network — caddy reaches us by container name.
+  # Shared proxy network — Traefik reaches us by container name.
   networks_advanced {
     name    = data.docker_network.proxy.name
     aliases = [data.coder_workspace.me.name]
@@ -369,14 +425,14 @@ resource "docker_container" "workspace" {
     ip   = "host-gateway"
   }
 
-  # The agent dials home using CODER_ACCESS_URL (now coder.sandbox.lvh.me).
-  # lvh.me public DNS resolves to 127.0.0.1, which inside the workspace
-  # container is the container itself. Force-resolve it to the host gateway
-  # so the agent can actually reach the Mac host's port 80 → Caddy → Coder.
-  host {
-    host = "coder.${var.sandbox_domain}"
-    ip   = "host-gateway"
-  }
+  # NOTE: do NOT pin coder.<sandbox_domain> in /etc/hosts here. The workspace
+  # is on the shared `mercato-proxy` network where the coder service has the
+  # alias `coder.<sandbox_domain>` (set in docker-compose.yml). Letting Docker
+  # DNS resolve the name means the agent reaches Coder DIRECTLY via the docker
+  # network, bypassing Traefik. This is critical: Traefik can't reliably strip
+  # `Sec-WebSocket-Extensions`, and Coder's nhooyr.io/websocket negotiates
+  # permessage-deflate → RSV1 frames → yamux "unexpected rsv bits" → agent
+  # dies seconds after connecting.
 
   volumes {
     container_path = "/home/coder"
@@ -384,40 +440,13 @@ resource "docker_container" "workspace" {
     read_only      = false
   }
 
-  # ---- caddy-docker-proxy labels (subdomain reverse proxy on 80/443) ------
-  # App on :3000 → <name>.<domain>
-  labels {
-    label = "caddy_0"
-    value = local.app_site_addr
-  }
-  labels {
-    label = "caddy_0.reverse_proxy"
-    value = "{{upstreams 3000}}"
-  }
-  # Splash on :4000 → <name>-splash.<domain>
-  labels {
-    label = "caddy_1"
-    value = local.splash_site_addr
-  }
-  labels {
-    label = "caddy_1.reverse_proxy"
-    value = "{{upstreams 4000}}"
-  }
-
-  labels {
-    label = "coder.owner"
-    value = data.coder_workspace_owner.me.name
-  }
-  labels {
-    label = "coder.owner_id"
-    value = data.coder_workspace_owner.me.id
-  }
-  labels {
-    label = "coder.workspace_id"
-    value = data.coder_workspace.me.id
-  }
-  labels {
-    label = "coder.workspace_name"
-    value = data.coder_workspace.me.name
+  # All Traefik + bookkeeping labels are defined in `local.workspace_labels`
+  # above; emit them via a single dynamic block.
+  dynamic "labels" {
+    for_each = local.workspace_labels
+    content {
+      label = labels.key
+      value = labels.value
+    }
   }
 }

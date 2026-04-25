@@ -44,14 +44,14 @@ ONBOARDING_DB_USER=$(read_env ONBOARDING_DB_USER onboarding)
 ONBOARDING_DB_PASSWORD=$(read_env ONBOARDING_DB_PASSWORD onboarding)
 ONBOARDING_DB_NAME=$(read_env ONBOARDING_DB_NAME onboarding)
 SANDBOX_DOMAIN=$(read_env SANDBOX_DOMAIN lvh.me)
-CADDY_SCHEME=$(read_env CADDY_SCHEME http)
-CADDY_PORT_SUFFIX=$(read_env CADDY_PORT_SUFFIX '')
-CADDY_HTTP_PORT=$(read_env CADDY_HTTP_PORT 80)
+PROXY_SCHEME=$(read_env PROXY_SCHEME http)
+PROXY_PORT_SUFFIX=$(read_env PROXY_PORT_SUFFIX '')
+TRAEFIK_HTTP_PORT=$(read_env TRAEFIK_HTTP_PORT 80)
 
 mkdir -p .runtime
 
-echo "[start] bringing up control-plane services (coder + postgres + caddy)…"
-docker compose up -d postgres-coder postgres-onboarding coder caddy
+echo "[start] bringing up control-plane services (coder + postgres + traefik)…"
+docker compose up -d postgres-coder postgres-onboarding coder traefik
 
 echo "[start] waiting for services to become healthy (timeout: 120s)…"
 deadline=$(( $(date +%s) + 120 ))
@@ -130,12 +130,13 @@ cat <<EOF
 
 [start] up.
 
-  Coder admin:  http://localhost:${CODER_HTTP_PORT}
+  Coder admin:  ${PROXY_SCHEME}://coder.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}
                 (admin: ${CODER_FIRST_USER_EMAIL} / ${CODER_FIRST_USER_PASSWORD})
-  Onboarding:   http://localhost:${ONBOARDING_HTTP_PORT}
-  Caddy proxy:  ${CADDY_SCHEME}://<workspace>.${SANDBOX_DOMAIN}${CADDY_PORT_SUFFIX} (app)
-                ${CADDY_SCHEME}://<workspace>-splash.${SANDBOX_DOMAIN}${CADDY_PORT_SUFFIX} (splash)
-                listening on host port ${CADDY_HTTP_PORT}
+  Onboarding:   ${PROXY_SCHEME}://${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}
+  Workspaces:   ${PROXY_SCHEME}://<workspace>.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}        (app)
+                ${PROXY_SCHEME}://<workspace>-splash.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX} (splash)
+                ${PROXY_SCHEME}://<workspace>-code.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}   (VS Code)
+                Traefik dashboard: http://localhost:${TRAEFIK_DASHBOARD_PORT:-8080}/dashboard/
 
   Onboarding DB: postgres://${ONBOARDING_DB_USER}:${ONBOARDING_DB_PASSWORD}@localhost:${ONBOARDING_DB_PORT}/${ONBOARDING_DB_NAME}
 
