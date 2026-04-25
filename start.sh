@@ -72,11 +72,7 @@ while :; do
 done
 
 # --- 2. bootstrap Coder admin token (task #4) -------------------------------
-if [ -f scripts/bootstrap-coder.sh ]; then
-  bash scripts/bootstrap-coder.sh
-else
-  echo "[skip] scripts/bootstrap-coder.sh not yet implemented (task #4)"
-fi
+bash scripts/bootstrap-coder.sh
 
 # --- 3. build workspace image (task #2) -------------------------------------
 if [ -f scripts/build-workspace-image.sh ]; then
