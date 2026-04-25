@@ -106,7 +106,7 @@ resource "coder_app" "code-server" {
   url          = "http://localhost:13337/?folder=/home/coder/app"
   icon         = "/icon/code.svg"
   subdomain    = false
-  share        = "owner"
+  share        = "authenticated"
   open_in      = "tab"
 
   healthcheck {
@@ -123,7 +123,7 @@ resource "coder_app" "splash" {
   url          = "http://localhost:4000"
   icon         = "/icon/widgets.svg"
   subdomain    = false
-  share        = "owner"
+  share        = "authenticated"
   open_in      = "tab"
 }
 
@@ -134,7 +134,7 @@ resource "coder_app" "app" {
   url          = "http://localhost:3000"
   icon         = "/icon/widgets.svg"
   subdomain    = false
-  share        = "owner"
+  share        = "authenticated"
   open_in      = "tab"
 
   healthcheck {
