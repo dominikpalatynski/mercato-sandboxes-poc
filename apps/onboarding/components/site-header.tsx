@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getSession } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { AccountMenu } from '@/components/account-menu';
 
 export async function SiteHeader() {
   const session = await getSession();
@@ -33,14 +34,7 @@ export async function SiteHeader() {
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/dashboard">Dashboard</Link>
               </Button>
-              <span className="hidden text-muted-foreground sm:inline">
-                {session.email}
-              </span>
-              <form action="/api/logout" method="post">
-                <Button type="submit" variant="outline" size="sm">
-                  Log out
-                </Button>
-              </form>
+              <AccountMenu email={session.email} />
             </>
           ) : (
             <>

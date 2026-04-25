@@ -1,6 +1,10 @@
 import Link from 'next/link';
 
-export function SiteFooter() {
+import { getSession } from '@/lib/auth';
+
+export async function SiteFooter() {
+  const session = await getSession();
+
   return (
     <footer className="border-t border-border">
       <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-muted-foreground sm:flex-row">
@@ -18,12 +22,21 @@ export function SiteFooter() {
           >
             Privacy
           </Link>
-          <Link
-            href="/login"
-            className="hover:text-foreground hover:underline underline-offset-4"
-          >
-            Log in
-          </Link>
+          {session ? (
+            <Link
+              href="/dashboard"
+              className="hover:text-foreground hover:underline underline-offset-4"
+            >
+              Dashboard
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="hover:text-foreground hover:underline underline-offset-4"
+            >
+              Log in
+            </Link>
+          )}
         </nav>
         <p>
           Powered by{' '}
