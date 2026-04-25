@@ -143,22 +143,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: mercato-proxy
-      traefik.http.routers.coder.rule: Host(`coder.${SANDBOX_DOMAIN:-sandbox.lvh.me}`)
-      traefik.http.routers.coder.entrypoints: web
-      traefik.http.routers.coder.middlewares: coder-noenc@docker
-      traefik.http.services.coder.loadbalancer.server.port: "80"
-      # Strip Accept-Encoding upstream so HTTP-level gzip is never negotiated.
-      traefik.http.middlewares.coder-noenc.headers.customrequestheaders.Accept-Encoding: ""
-      # Strip Sec-WebSocket-Extensions on BOTH directions so permessage-deflate
-      # never gets negotiated. Without the request-side strip, the upstream
-      # (Coder + code-server + the agent's PTY WS) accepts the offer and emits
-      # RSV1-flagged frames; nhooyr.io/websocket rejects them with close code
-      # 1002 → terminal "trying to connect" loop, VS Code blank screen.
-      traefik.http.middlewares.coder-noenc.headers.customrequestheaders.Sec-WebSocket-Extensions: ""
-      traefik.http.middlewares.coder-noenc.headers.customresponseheaders.Sec-WebSocket-Extensions: ""
+    # Browser-facing Traefik labels MOVED to the docker-socket-proxy service:
+    # Traefik routes coder.<DOMAIN> → nginx shim :81 → coder:80, so the shim
+    # can reliably strip Sec-WebSocket-Extensions (Traefik's docker-label
+    # header middleware doesn't apply to WS upgrades). Workspace agents still
+    # reach coder:80 directly via the `coder.<DOMAIN>` network alias above.
 
   onboarding:
     build:
@@ -219,8 +208,18 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./proxy/docker-api-shim.conf:/etc/nginx/conf.d/default.conf:ro
+      # Coder WS-extension stripping shim (see proxy/coder-ws-shim.conf for
+      # rationale). Listens on :81 inside the container; Traefik routes
+      # coder.<DOMAIN> here instead of straight to coder:80.
+      - ./proxy/coder-ws-shim.conf:/etc/nginx/conf.d/coder-ws-shim.conf:ro
     networks:
       - mercato-proxy
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: mercato-proxy
+      traefik.http.routers.coder.rule: Host(`coder.${SANDBOX_DOMAIN:-sandbox.lvh.me}`)
+      traefik.http.routers.coder.entrypoints: web
+      traefik.http.services.coder.loadbalancer.server.port: "81"
 
   # Single edge proxy. Discovers every routable container by docker labels on
   # the mercato-proxy network (coder, onboarding, every workspace). Replaces
