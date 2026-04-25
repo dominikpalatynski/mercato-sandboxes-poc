@@ -103,12 +103,9 @@ services:
       - coder-data:/home/coder/.config
     networks:
       - control
-      - mercato-proxy
-    labels:
-      # Reach Coder admin (and path-based VS Code/terminal apps) via the
-      # base-domain family, so cookies stay coherent with sandbox.lvh.me.
-      caddy_0: http://coder.${SANDBOX_DOMAIN:-lvh.me}:80
-      caddy_0.reverse_proxy: "{{upstreams 7080}}"
+    # NOTE: Coder is intentionally NOT behind caddy-docker-proxy. Coder's
+    # web terminal + code-server use long-lived WebSocket connections that
+    # the dev caddy setup mishandles. Accessed directly on host port 7080.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
