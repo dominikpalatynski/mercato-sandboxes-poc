@@ -82,11 +82,13 @@ export async function requireSessionFromRequest(req: Request): Promise<SessionPa
 }
 
 export function sessionCookieOptions() {
+  const domain = process.env.COOKIE_DOMAIN?.trim();
   return {
     httpOnly: true as const,
     sameSite: 'lax' as const,
     secure: process.env.COOKIE_SECURE === 'true',
     path: '/',
     maxAge: SESSION_MAX_AGE_SECONDS,
+    ...(domain ? { domain } : {}),
   };
 }

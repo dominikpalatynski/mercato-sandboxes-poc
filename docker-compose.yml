@@ -125,12 +125,24 @@ services:
       CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-http://localhost:7080}
       CODER_ADMIN_TOKEN_FILE: /run/secrets/coder-admin-token
       CODER_TEMPLATE_ID_FILE: /run/secrets/coder-template-id
+      # Cookie scoped to the wildcard root so sessions are coherent across
+      # the onboarding host AND every <sandbox>.<SANDBOX_DOMAIN> subdomain.
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.${SANDBOX_DOMAIN:-lvh.me}}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "${ONBOARDING_HTTP_PORT:-3000}:3000"
     volumes:
       - ./.runtime:/run/secrets:ro
     networks:
       - control
+      - mercato-proxy
+    labels:
+      # Explicit http://...:80 site addr disables Caddy's auto-HTTPS redirect.
+      # For prod set CADDY_SCHEME=https in .env; the workspace template uses the
+      # same trick. Cookie domain (.sandbox.lvh.me) covers both this host AND
+      # every <name>.sandbox.lvh.me workspace subdomain → coherent sessions.
+      caddy_0: http://${SANDBOX_DOMAIN:-lvh.me}:80, http://app.${SANDBOX_DOMAIN:-lvh.me}:80
+      caddy_0.reverse_proxy: "{{upstreams 3000}}"
 
   # caddy-docker-proxy: dynamic reverse proxy that reads docker labels.
   # Each workspace container (spawned by the Coder template) is attached to the
