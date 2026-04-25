@@ -4,6 +4,18 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
 export default function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -34,41 +46,59 @@ export default function LoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div>
-        <label className="mb-1 block text-sm text-gray-300">Email</label>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded border border-white/15 bg-black/30 px-3 py-2"
-          autoComplete="email"
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-sm text-gray-300">Password</label>
-        <input
-          type="password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded border border-white/15 bg-black/30 px-3 py-2"
-          autoComplete="current-password"
-        />
-      </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <button
-        type="submit"
-        disabled={busy}
-        className="w-full rounded bg-indigo-500 px-3 py-2 font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
-      >
-        {busy ? 'Logging in…' : 'Log in'}
-      </button>
-      <p className="text-center text-sm text-gray-400">
-        No account? <Link href="/signup" className="text-indigo-300 hover:underline">Sign up</Link>
-      </p>
-    </form>
+    <Card className="w-full">
+      <form onSubmit={onSubmit}>
+        <CardHeader className="space-y-2 text-center">
+          <CardTitle>Welcome back</CardTitle>
+          <CardDescription>
+            Log in to manage your Mercato sandboxes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              placeholder="••••••••"
+            />
+          </div>
+          {error && (
+            <p className="text-sm font-medium text-destructive">{error}</p>
+          )}
+        </CardContent>
+        <CardFooter className="flex flex-col gap-3">
+          <Button type="submit" disabled={busy} className="w-full">
+            {busy ? 'Logging in…' : 'Log in'}
+          </Button>
+          <p className="text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
+            <Link
+              href="/signup"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Sign up
+            </Link>
+          </p>
+        </CardFooter>
+      </form>
+    </Card>
   );
 }

@@ -14,6 +14,10 @@ create table if not exists users (
 
 -- Postgres 17 supports IF NOT EXISTS on ALTER TABLE ADD COLUMN — idempotent re-runs.
 alter table users add column if not exists coder_temp_password text;
+alter table users add column if not exists first_name text;
+alter table users add column if not exists last_name text;
+alter table users add column if not exists company_name text;
+alter table users add column if not exists accepted_terms_at timestamptz;
 
 create table if not exists sandboxes (
   id uuid primary key default gen_random_uuid(),

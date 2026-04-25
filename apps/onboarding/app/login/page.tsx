@@ -2,8 +2,7 @@ import LoginForm from './form';
 
 export default function LoginPage() {
   return (
-    <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-2xl font-semibold">Log in</h1>
+    <div className="mx-auto flex max-w-md flex-col items-center justify-center py-10">
       <LoginForm />
     </div>
   );

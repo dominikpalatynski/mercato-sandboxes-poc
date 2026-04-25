@@ -2,8 +2,7 @@ import SignupForm from './form';
 
 export default function SignupPage() {
   return (
-    <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-2xl font-semibold">Sign up</h1>
+    <div className="mx-auto flex max-w-md flex-col items-center justify-center py-10">
       <SignupForm />
     </div>
   );
