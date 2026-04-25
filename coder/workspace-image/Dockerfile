@@ -1,6 +1,6 @@
 # mercato-workspace — base image for Coder workspaces (one container per sandbox).
 #
-# Per SPEC.md §3 / §7: Debian-slim node 24 with the build deps Mercato needs
+# Per .ai/SPEC.md §3 / §7: Debian-slim node 24 with the build deps Mercato needs
 # (python3/make/g++ for native modules), psql + git + curl, plus code-server
 # and corepack-pinned yarn 4.12.
 #

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
 const CODER_URL = (process.env.CODER_URL || 'http://coder').replace(/\/$/, '');
-const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'http://localhost').replace(/\/$/, '');
+const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'https://coder.sandbox.lvh.me').replace(/\/$/, '');
+const WILDCARD_APPS_DOMAIN = process.env.WILDCARD_APPS_DOMAIN || 'apps.sandbox.lvh.me';
 const CODER_ADMIN_TOKEN_FILE = process.env.CODER_ADMIN_TOKEN_FILE || '/run/secrets/coder-admin-token';
 const CODER_TEMPLATE_ID_FILE = process.env.CODER_TEMPLATE_ID_FILE || '/run/secrets/coder-template-id';
 
@@ -88,9 +89,10 @@ export interface CoderLogLine {
 }
 
 export interface CoderLinks {
-  vscode: string;
-  splash: string;
-  app: string;
+  // Path-based — Coder's built-in web terminal at /@<user>/<ws>/terminal.
+  // Authenticated via the same `coder_session_token` cookie set by
+  // /api/coder-login. There is no port-forwarded equivalent (Coder doesn't
+  // expose the agent's PTY on a TCP port).
   terminal: string;
 }
 
@@ -394,9 +396,24 @@ export function resolveAppUrl(args: {
 }): string | null {
   const app = args.apps.find((a) => a.slug === args.slug);
   if (!app) return null;
-  if (app.external && app.url) return app.url;
+  if (app.external && app.url) return normalizeToPublicScheme(app.url, args.coderPublicUrl);
   const base = `${args.coderPublicUrl.replace(/\/$/, '')}/@${args.ownerName}/${args.name}`;
   return `${base}/apps/${args.slug}`;
+}
+
+function normalizeToPublicScheme(url: string, coderPublicUrl: string): string {
+  try {
+    const publicUrl = new URL(coderPublicUrl);
+    const target = new URL(url);
+    if (target.hostname === publicUrl.hostname || target.hostname.endsWith(`.${WILDCARD_APPS_DOMAIN}`)) {
+      target.protocol = publicUrl.protocol;
+      if (target.protocol === 'https:' && target.port === '80') target.port = '';
+      if (target.protocol === 'http:' && target.port === '443') target.port = '';
+    }
+    return target.toString();
+  } catch {
+    return url;
+  }
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {
@@ -440,9 +457,6 @@ export function buildLinks(args: {
 }): CoderLinks {
   const base = `${args.coderPublicUrl.replace(/\/$/, '')}/@${args.ownerName}/${args.name}`;
   return {
-    vscode: `${base}/apps/code-server`,
-    splash: `${base}/apps/splash`,
-    app: `${base}/apps/app`,
     terminal: `${base}/terminal`,
   };
 }

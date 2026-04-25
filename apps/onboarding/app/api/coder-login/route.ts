@@ -85,6 +85,25 @@ export async function GET(req: Request): Promise<NextResponse> {
   // 5. Set coder_session_token cookie scoped to the shared wildcard domain.
   const cookieDomain = process.env.COOKIE_DOMAIN?.trim() || undefined;
   const response = NextResponse.redirect(nextUrl.toString(), 302);
+
+  // Clear stale parent-domain tokens before setting a fresh one. Browser
+  // requests can otherwise carry multiple coder_session_token values, and the
+  // Coder websocket endpoints may authenticate against the wrong token.
+  const clearOptions = {
+    httpOnly: false,
+    sameSite: 'lax' as const,
+    secure: process.env.COOKIE_SECURE === 'true',
+    path: '/',
+    maxAge: 0,
+  };
+  response.cookies.set('coder_session_token', '', clearOptions);
+  if (cookieDomain) {
+    response.cookies.set('coder_session_token', '', {
+      ...clearOptions,
+      domain: cookieDomain,
+    });
+  }
+
   response.cookies.set('coder_session_token', coderKey, {
     httpOnly: false, // Coder's JS reads this cookie; must NOT be httpOnly.
     sameSite: 'lax',

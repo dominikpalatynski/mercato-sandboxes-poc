@@ -54,7 +54,7 @@ const POLL_INTERVAL_MS = 3_000;
 
 // next.config.js inlines this at build time; default keeps local dev sane.
 const CODER_PUBLIC_URL =
-  (process.env.NEXT_PUBLIC_CODER_URL || 'http://coder.sandbox.lvh.me').replace(/\/$/, '');
+  (process.env.NEXT_PUBLIC_CODER_URL || 'https://coder.sandbox.lvh.me').replace(/\/$/, '');
 
 interface LinkSpec {
   label: string;
@@ -140,8 +140,10 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
       timer = setTimeout(tick, POLL_INTERVAL_MS);
     }
 
-    if (initial.status !== 'ready' && initial.status !== 'failed') {
-      timer = setTimeout(tick, POLL_INTERVAL_MS);
+    if (initial.status === 'failed') {
+      stoppedRef.current = true;
+    } else {
+      timer = setTimeout(tick, initial.status === 'ready' ? 0 : POLL_INTERVAL_MS);
     }
     return () => {
       stoppedRef.current = true;
@@ -185,11 +187,15 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
     return `${CODER_PUBLIC_URL}/@${sandbox.coder_owner_name}/${sandbox.coder_workspace_name}`;
   }, [sandbox.coder_owner_name, sandbox.coder_workspace_name]);
 
+  // Every link goes through `viaCoderLogin: true` so the browser is guaranteed
+  // to carry the `coder_session_token` cookie when it lands on the wildcard
+  // host (`*.apps.<DOMAIN>`). The cookie is scoped to `.<DOMAIN>` and Coder
+  // accepts it transparently — no Coder login form on first click.
   const links: LinkSpec[] = [
     { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url, icon: Code2, viaCoderLogin: true },
     { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url, icon: Terminal, viaCoderLogin: true },
-    { label: 'Open Mercato App', subtitle: 'Direct port (3000)', url: sandbox.app_url, icon: AppWindow },
-    { label: 'Open Splash', subtitle: 'Build progress (4000)', url: sandbox.splash_url, icon: Loader },
+    { label: 'Open Mercato App', subtitle: 'Port 3000 via Coder wildcard', url: sandbox.app_url, icon: AppWindow, viaCoderLogin: true },
+    { label: 'Open Splash', subtitle: 'Port 4000 via Coder wildcard', url: sandbox.splash_url, icon: Loader, viaCoderLogin: true },
     { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl, icon: LayoutDashboard, viaCoderLogin: true },
   ];
 

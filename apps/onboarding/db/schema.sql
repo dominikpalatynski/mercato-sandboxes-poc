@@ -1,5 +1,5 @@
 -- Mercato Sandboxes - onboarding DB schema
--- Per SPEC.md §2 data model. Idempotent.
+-- Per .ai/SPEC.md §2 data model. Idempotent.
 
 create extension if not exists "pgcrypto";
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-workspace-image.sh - builds the mercato-workspace image used as the
-# base for every Coder workspace (see SPEC.md section 3).
+# base for every Coder workspace (see .ai/SPEC.md section 3).
 #
 # Honors $MERCATO_WORKSPACE_IMAGE (tag) and $WORKSPACE_BUILD_PLATFORM (default
 # linux/arm64 for the Apple Silicon host this POC targets - see section 7).

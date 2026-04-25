@@ -5,32 +5,26 @@
 #   - postgres-onboarding  : Onboarding app DB (postgres:17-alpine, host port 5544)
 #   - coder                : Coder control plane (ghcr.io/coder/coder:latest)
 #   - onboarding           : Next.js UI for sign-up + sandbox provisioning
-#   - traefik              : single edge proxy for the whole stack
-#                            (replaces the old caddy + nginx-coder pair)
+#   - edge                 : single edge proxy for the whole stack
 #
-# Routing model — Traefik discovers everything from docker labels on the
-# `mercato-proxy` network:
-#   coder.sandbox.lvh.me           → coder:80
-#   sandbox.lvh.me, app.sandbox…   → onboarding:3000
-#   <ws>.sandbox.lvh.me            → workspace container :3000  (labels in
-#   <ws>-splash.sandbox.lvh.me     → workspace container :4000   coder/template/
-#   <ws>-code.sandbox.lvh.me       → workspace container :13337  main.tf)
-#
-# WebSocket handling: Traefik forwards Upgrade / Connection automatically and
-# does not buffer streams. The Coder PTY / metadata WS that broke under
-# caddy-docker-proxy works as-is here. We still strip Accept-Encoding +
-# Sec-WebSocket-Extensions on the Coder route to keep permessage-deflate from
-# being negotiated (Coder's nhooyr.io/websocket rejects RSV1 frames with 1002).
+# Routing model — a small nginx edge proxy publishes:
+#   https://coder.sandbox.lvh.me           → coder:80
+#   https://*.apps.sandbox.lvh.me          → Coder wildcard app proxy
+#   https://sandbox.lvh.me, app.sandbox…   → onboarding:3000
+# Port 80 only redirects to HTTPS. Docker Desktop's published port-80 path
+# was observed to close Coder PTY/code-server websocket streams after 101;
+# the standard HTTPS :443 path stays stable and matches Coder's documented
+# production topology.
 
 name: mercato-sandboxes
 
 networks:
   control:
     driver: bridge
-  # Shared edge network: traefik + everything it proxies lives here. The Coder
-  # template attaches every workspace container to it. `name:` is pinned so
-  # the Terraform `data "docker_network" "proxy"` lookup finds it regardless
-  # of compose's project-name prefix.
+  # Shared edge network: the nginx edge proxy, Coder, onboarding, and all
+  # workspace containers live here. `name:` is pinned so the Terraform
+  # `data "docker_network" "proxy"` lookup finds it regardless of compose's
+  # project-name prefix.
   mercato-proxy:
     name: mercato-proxy
     driver: bridge
@@ -90,21 +84,18 @@ services:
         condition: service_healthy
     environment:
       CODER_PG_CONNECTION_URL: postgres://coder:coder@postgres-coder:5432/coder?sslmode=disable
-      # Listen on :80 inside the container so the workspace agent can reach
-      # us directly via the `coder.<SANDBOX_DOMAIN>` Docker DNS alias on the
-      # mercato-proxy network (DNS aliases don't carry a port, and the agent
-      # uses CODER_ACCESS_URL which is plain http:80). Browser traffic still
-      # arrives via Traefik on the host's :80 → routed by Host header to this
-      # container's :80 (see traefik.http.services.coder.loadbalancer below).
+      # Listen on :80 inside the container. Browser traffic arrives through
+      # nginx HTTPS on host :443; fresh workspace agents use the template's
+      # internal AGENT_CODER_URL default (`http://coder.<SANDBOX_DOMAIN>`) on
+      # the shared Docker network.
       CODER_HTTP_ADDRESS: 0.0.0.0:80
       # Browser-facing origin. Coder validates the WS Origin header against
       # this; mismatch silently 1006s the PTY / metadata-watch / path-app
-      # streams. Workspace agents resolve coder.sandbox.lvh.me to host-gateway
-      # via extra_hosts in coder/template/main.tf.
-      CODER_ACCESS_URL: ${CODER_ACCESS_URL:-http://coder.sandbox.lvh.me}
-      # Wildcard for subdomain-style coder_app proxying. Path-based apps still
-      # work without it, but setting this lets us migrate to safer subdomain
-      # apps later (lvh.me already wildcards to 127.0.0.1 — no DNS work).
+      # streams.
+      CODER_ACCESS_URL: ${CODER_ACCESS_URL:-https://coder.sandbox.lvh.me}
+      # Wildcard for subdomain-style coder_app / port-forward proxying. The
+      # edge proxy routes *.apps.<domain> back to Coder, and Coder proxies into
+      # the workspace. Coder expects the hostname form, not a URL.
       CODER_WILDCARD_ACCESS_URL: ${CODER_WILDCARD_ACCESS_URL:-*.apps.sandbox.lvh.me}
       # First user env vars are referenced by scripts/bootstrap-coder.sh (task #4)
       CODER_FIRST_USER_EMAIL: ${CODER_FIRST_USER_EMAIL:-admin@local.dev}
@@ -115,6 +106,10 @@ services:
       # Default admin-token cap is 168h (7d); we extend it for the POC onboarding workflow.
       CODER_MAX_TOKEN_LIFETIME: "8760h"
       CODER_MAX_ADMIN_TOKEN_LIFETIME: "8760h"
+      # Force the agent relay onto ordinary WebSocket. Some reverse proxies
+      # mishandle Coder's default non-standard Upgrade: derp transport, which
+      # shows up as terminal/PTTY streams that connect and immediately close.
+      CODER_DERP_FORCE_WEBSOCKETS: "true"
       # Allow share=authenticated on path-based coder_apps (code-server / terminal).
       CODER_DANGEROUS_ALLOW_PATH_APP_SHARING: "true"
       CODER_DANGEROUS_ALLOW_PATH_APP_SITE_OWNER_ACCESS: "true"
@@ -125,15 +120,8 @@ services:
       control:
       mercato-proxy:
         # Workspace agents resolve coder.<DOMAIN> via the mercato-proxy
-        # docker network's DNS so they reach Coder DIRECTLY (no Traefik in
-        # the path). Required because Traefik's docker-label middleware can't
-        # reliably strip Sec-WebSocket-Extensions on the agent's yamux WS,
-        # and Coder's nhooyr.io/websocket negotiates permessage-deflate by
-        # default → RSV1 frames → "received header with unexpected rsv bits"
-        # → agent dies seconds after connecting.
-        # Browsers still hit Traefik on the host (port 80) → Traefik routes
-        # by Host header to this same coder container. Origin check passes
-        # because CODER_ACCESS_URL matches the browser-facing URL.
+        # docker network's DNS so they reach Coder directly over the internal
+        # bridge. Browsers hit the nginx edge on :443.
         aliases:
           - coder.${SANDBOX_DOMAIN:-sandbox.lvh.me}
     extra_hosts:
@@ -143,17 +131,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-    # Browser-facing Traefik labels MOVED to the docker-socket-proxy service:
-    # Traefik routes coder.<DOMAIN> → nginx shim :81 → coder:80, so the shim
-    # can reliably strip Sec-WebSocket-Extensions (Traefik's docker-label
-    # header middleware doesn't apply to WS upgrades). Workspace agents still
-    # reach coder:80 directly via the `coder.<DOMAIN>` network alias above.
 
   onboarding:
     build:
       context: ./apps/onboarding
       args:
-        CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-http://coder.sandbox.lvh.me}
+        CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-https://coder.sandbox.lvh.me}
     container_name: onboarding
     restart: unless-stopped
     depends_on:
@@ -166,13 +149,13 @@ services:
       POSTGRES_URL: postgres://${ONBOARDING_DB_USER:-onboarding}:${ONBOARDING_DB_PASSWORD:-onboarding}@postgres-onboarding:5432/${ONBOARDING_DB_NAME:-onboarding}
       JWT_SECRET: ${JWT_SECRET}
       CODER_URL: http://coder
-      CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-http://coder.sandbox.lvh.me}
+      CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-https://coder.sandbox.lvh.me}
       CODER_ADMIN_TOKEN_FILE: /run/secrets/coder-admin-token
       CODER_TEMPLATE_ID_FILE: /run/secrets/coder-template-id
       # Cookie scoped to the wildcard root so sessions are coherent across
       # the onboarding host AND every <sandbox>.<SANDBOX_DOMAIN> subdomain.
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.${SANDBOX_DOMAIN:-lvh.me}}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.${SANDBOX_DOMAIN:-sandbox.lvh.me}}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
     ports:
       - "${ONBOARDING_HTTP_PORT:-3000}:3000"
     volumes:
@@ -180,80 +163,34 @@ services:
     networks:
       - control
       - mercato-proxy
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: mercato-proxy
-      traefik.http.routers.onboarding.rule: Host(`${SANDBOX_DOMAIN:-lvh.me}`) || Host(`app.${SANDBOX_DOMAIN:-lvh.me}`)
-      traefik.http.routers.onboarding.entrypoints: web
-      traefik.http.services.onboarding.loadbalancer.server.port: "3000"
 
-  # docker-socket-proxy: read-only HTTP proxy in front of /var/run/docker.sock
-  # that ALSO rewrites every `/v1.NN/...` path to `/v1.45/...`.
-  #
-  # WHY: Docker Desktop 4.57+ ships engine 29.x with MinAPIVersion 1.44 and
-  # hard-rejects requests below that. Traefik's go-docker client hardcodes
-  # `GET /v1.24/version` for its initial API negotiation and gives up on the
-  # 400 — there is no escape hatch in the Traefik docker provider for setting
-  # a different starting version. The shim translates paths so Traefik thinks
-  # it's talking to an older daemon. See proxy/docker-api-shim.conf for full
-  # rationale + the security note (only GET endpoints reachable).
-  docker-socket-proxy:
-    image: nginx:alpine
-    container_name: mercato-docker-proxy
-    restart: unless-stopped
-    # Patch out nginx's default `user nginx;` so workers run as root and can
-    # read the root-owned /var/run/docker.sock. Without this we get 502s with
-    # "Permission denied" in the shim's error log.
-    command: ["sh", "-c", "sed -i '/^user /d' /etc/nginx/nginx.conf && exec nginx -g 'user root; daemon off;'"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./proxy/docker-api-shim.conf:/etc/nginx/conf.d/default.conf:ro
-      # Coder WS-extension stripping shim (see proxy/coder-ws-shim.conf for
-      # rationale). Listens on :81 inside the container; Traefik routes
-      # coder.<DOMAIN> here instead of straight to coder:80.
-      - ./proxy/coder-ws-shim.conf:/etc/nginx/conf.d/coder-ws-shim.conf:ro
-    networks:
-      - mercato-proxy
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: mercato-proxy
-      traefik.http.routers.coder.rule: Host(`coder.${SANDBOX_DOMAIN:-sandbox.lvh.me}`)
-      traefik.http.routers.coder.entrypoints: web
-      traefik.http.services.coder.loadbalancer.server.port: "81"
-
-  # Single edge proxy. Discovers every routable container by docker labels on
-  # the mercato-proxy network (coder, onboarding, every workspace). Replaces
-  # the old caddy + nginx-coder pair. ACME for prod is wired in
-  # docker-compose.prod.yml via a cloudflare resolver + the websecure
-  # entrypoint.
-  traefik:
-    image: traefik:v3.5
-    container_name: mercato-traefik
+  edge:
+    image: nginx:stable-alpine
+    container_name: edge
     restart: unless-stopped
     depends_on:
-      - docker-socket-proxy
-    environment:
-      # Docker Desktop 4.57+ ships engine 29.x with MinAPIVersion 1.44, which
-      # hard-rejects requests below that. Traefik's go-docker client starts
-      # negotiation at /v1.24/version → 400 → Traefik gives up. Pinning the
-      # API version env var skips negotiation entirely.
-      DOCKER_API_VERSION: "1.45"
+      - onboarding
+      - coder
     command:
-      - --providers.docker=true
-      - --providers.docker.endpoint=tcp://docker-socket-proxy:2375
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=mercato-proxy
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      # Dev-only dashboard at http://localhost:8080/dashboard/ — leave the
-      # `--api.insecure` flag off for prod and front it with auth.
-      - --api.dashboard=true
-      - --api.insecure=true
-      - --log.level=INFO
-      - --accesslog=true
+      - /bin/sh
+      - -lc
+      - |
+        sed \
+          -e "s|\$${SANDBOX_DOMAIN}|$${SANDBOX_DOMAIN}|g" \
+          -e "s|\$${WILDCARD_APPS_DOMAIN}|$${WILDCARD_APPS_DOMAIN}|g" \
+          -e "s|\$${PROXY_SCHEME}|$${PROXY_SCHEME}|g" \
+          /etc/nginx/templates/edge.conf.template \
+          > /etc/nginx/nginx.conf
+        exec nginx -g 'daemon off;'
+    environment:
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-sandbox.lvh.me}
+      WILDCARD_APPS_DOMAIN: ${WILDCARD_APPS_DOMAIN:-apps.sandbox.lvh.me}
+      PROXY_SCHEME: ${PROXY_SCHEME:-https}
     ports:
       - "${TRAEFIK_HTTP_PORT:-80}:80"
       - "${TRAEFIK_HTTPS_PORT:-443}:443"
-      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"
+    volumes:
+      - ./proxy/edge.conf.template:/etc/nginx/templates/edge.conf.template:ro
+      - ./.runtime/tls:/etc/nginx/tls:ro
     networks:
       - mercato-proxy

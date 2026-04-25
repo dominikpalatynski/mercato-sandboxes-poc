@@ -36,6 +36,6 @@ config:
 # (--with-deps) are skipped because we don't need apt-get on macOS.
 test:
 	cd e2e && npm install --silent && npx playwright install chromium && \
-		BASE_URL=$${BASE_URL:-http://sandbox.lvh.me} \
+		BASE_URL=$${BASE_URL:-https://sandbox.lvh.me} \
 		SANDBOX_DOMAIN=$${SANDBOX_DOMAIN:-sandbox.lvh.me} \
 		npx playwright test --project=chromium

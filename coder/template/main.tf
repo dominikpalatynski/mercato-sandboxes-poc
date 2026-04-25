@@ -1,5 +1,5 @@
 ###############################################################################
-# Mercato Sandbox — Coder template (per SPEC.md §3 / §7)
+# Mercato Sandbox — Coder template (per .ai/SPEC.md §3 / §7, .ai/SPEC-CODER-PROXY.md)
 #
 # One workspace = one sidecar postgres + one mercato-workspace container on a
 # private docker network. The agent's startup script scaffolds the Mercato
@@ -7,16 +7,19 @@
 #
 # Networking model:
 #   * Each workspace container is attached to the shared `mercato-proxy`
-#     docker network so Traefik (the single edge proxy declared in
-#     docker-compose.yml) can reach :3000 / :4000 / :13337 by container alias.
-#   * Traefik discovers each workspace via docker labels and publishes:
-#         <workspace>.<SANDBOX_DOMAIN>           → app on :3000
-#         <workspace>-splash.<SANDBOX_DOMAIN>    → splash on :4000
-#         <workspace>-code.<SANDBOX_DOMAIN>      → code-server on :13337
-#     For local dev SANDBOX_DOMAIN defaults to `lvh.me` (resolves to 127.0.0.1
-#     for any subdomain — no /etc/hosts hacks). For prod set it to e.g.
-#     `sandbox.openmercato.com` with a wildcard DNS A record + DNS-01 wildcard
-#     cert via Traefik's cloudflare resolver.
+#     docker network so the Coder agent can reach the Coder server directly
+#     via the `coder.<SANDBOX_DOMAIN>` Docker DNS alias over internal HTTP.
+#   * Workspace ports are exposed via Coder's native wildcard access URL:
+#         3000--main--<ws>--<user>.apps.<SANDBOX_DOMAIN>   → app   on :3000
+#         4000--main--<ws>--<user>.apps.<SANDBOX_DOMAIN>   → splash on :4000
+#         13337--main--<ws>--<user>.apps.<SANDBOX_DOMAIN>  → code-server :13337
+#     Coder proxies the browser → workspace port hop itself. The nginx edge
+#     adds one wildcard vhost (`*.apps.<SANDBOX_DOMAIN>` → Coder) — no
+#     per-workspace labels.
+#   * For local dev SANDBOX_DOMAIN defaults to `sandbox.lvh.me` (any subdomain
+#     of `lvh.me` resolves to 127.0.0.1 — no /etc/hosts hacks). For prod set
+#     `apps.<your-domain>` as `wildcard_apps_domain`, plus a wildcard
+#     certificate covering `*.apps.<your-domain>` on the HTTPS edge.
 ###############################################################################
 
 terraform {
@@ -39,8 +42,8 @@ terraform {
 # AI keys: surfaced inside each workspace container as OPENAI_API_KEY /
 # ANTHROPIC_API_KEY for the preinstalled AI CLIs.
 #
-# Networking vars: drive the user-facing URLs that caddy publishes for each
-# workspace. Defaults match the local-dev setup (lvh.me on plain http:80).
+# Networking vars: drive the user-facing URLs the edge proxy publishes for
+# each workspace. Defaults match the local-dev setup (lvh.me on HTTPS :443).
 ###############################################################################
 
 variable "openai_api_key" {
@@ -65,8 +68,8 @@ variable "sandbox_domain" {
 
 variable "proxy_scheme" {
   type        = string
-  default     = "http"
-  description = "Scheme Traefik publishes URLs on (http for local lvh.me dev, https in prod with ACME)."
+  default     = "https"
+  description = "Scheme the edge proxy publishes URLs on. Local dev uses HTTPS on lvh.me with a generated certificate; prod should use ACME."
 }
 
 variable "proxy_port_suffix" {
@@ -75,10 +78,22 @@ variable "proxy_port_suffix" {
   description = "Optional port suffix appended to user-facing URLs (e.g. ':8080' if you can't bind 80). Empty for standard 80/443."
 }
 
-variable "traefik_entrypoint" {
+variable "wildcard_apps_domain" {
   type        = string
-  default     = "web"
-  description = "Traefik entrypoint name to expose workspace services on. `web` for HTTP-only dev; `websecure` in prod (TLS terminated by Traefik via the cloudflare DNS-01 wildcard cert configured on the entrypoint)."
+  default     = "apps.sandbox.lvh.me"
+  description = "Wildcard apex Coder publishes port-forwarded workspace ports under. Format: {port}--{agent}--{workspace}--{user}.<this>. Default `apps.sandbox.lvh.me` matches the dev nginx wildcard vhost. Set to `apps.<your-domain>` in prod."
+}
+
+variable "coder_public_url" {
+  type        = string
+  default     = ""
+  description = "Browser-facing Coder URL. Used only to rewrite Coder's generated agent bootstrap script to the internal agent URL."
+}
+
+variable "agent_coder_url" {
+  type        = string
+  default     = ""
+  description = "URL workspace containers use to download/connect the Coder agent. Defaults to http://coder.<sandbox_domain> on the shared Docker network."
 }
 
 # Default docker provider talks to whatever socket the coder container has
@@ -94,64 +109,35 @@ data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
 ###############################################################################
-# Locals — build the public URLs caddy will serve. Each workspace gets two
-# subdomains: "<name>" for the app and "<name>-splash" for the splash screen.
-# Coder workspace names are already constrained to [a-z0-9-]{3,32}, which is
-# DNS-label-safe.
+# Locals — build the public URLs Coder publishes for each listening port via
+# its native wildcard access URL feature. Format:
+#   {port}--{agent}--{workspace}--{user}.{wildcard_apps_domain}
+# Coder serves these under CODER_WILDCARD_ACCESS_URL = *.{wildcard_apps_domain}.
+# The shared session cookie at .{sandbox_domain} authenticates the request, so
+# clicking from the onboarding dashboard skips Coder's login form.
+#
+# Workspace names are constrained to [a-z0-9-]{3,32}; usernames are constrained
+# the same way by Coder. Both are DNS-label-safe.
 ###############################################################################
 
 locals {
-  ws_name     = lower(data.coder_workspace.me.name)
-  app_host    = "${local.ws_name}.${var.sandbox_domain}"
-  splash_host = "${local.ws_name}-splash.${var.sandbox_domain}"
-  code_host   = "${local.ws_name}-code.${var.sandbox_domain}"
-  app_url     = "${var.proxy_scheme}://${local.app_host}${var.proxy_port_suffix}"
-  splash_url  = "${var.proxy_scheme}://${local.splash_host}${var.proxy_port_suffix}"
-  code_url    = "${var.proxy_scheme}://${local.code_host}${var.proxy_port_suffix}"
+  ws_name    = lower(data.coder_workspace.me.name)
+  owner_name = data.coder_workspace_owner.me.name
 
-  # Traefik labels for this workspace. We build a single map and emit it via a
-  # `dynamic "labels"` block on docker_container.workspace below so the schema
-  # stays readable. Naming convention: <ws>-<svc> for routers and services.
-  workspace_labels = {
-    "traefik.enable"             = "true"
-    "traefik.docker.network"     = "mercato-proxy"
+  # Coder wildcard URLs for the workspace services. The edge proxy only needs
+  # a single `*.apps.<DOMAIN>` route that forwards to Coder.
+  code_url   = "${var.proxy_scheme}://13337--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
+  app_url    = "${var.proxy_scheme}://3000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
+  splash_url = "${var.proxy_scheme}://4000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
 
-    # ---- App on :3000 → <ws>.<domain> -------------------------------------
-    # NB: with >1 service on a single container Traefik can't auto-link the
-    # router → service, so each router must explicitly name its service.
-    "traefik.http.routers.${local.ws_name}-app.rule"                              = "Host(`${local.app_host}`)"
-    "traefik.http.routers.${local.ws_name}-app.entrypoints"                       = var.traefik_entrypoint
-    "traefik.http.routers.${local.ws_name}-app.service"                           = "${local.ws_name}-app"
-    "traefik.http.services.${local.ws_name}-app.loadbalancer.server.port"         = "3000"
+  public_coder_url = var.coder_public_url != "" ? trimsuffix(var.coder_public_url, "/") : "${var.proxy_scheme}://coder.${var.sandbox_domain}${var.proxy_port_suffix}"
+  agent_coder_url  = var.agent_coder_url != "" ? trimsuffix(var.agent_coder_url, "/") : "http://coder.${var.sandbox_domain}"
 
-    # ---- Splash on :4000 → <ws>-splash.<domain> ---------------------------
-    "traefik.http.routers.${local.ws_name}-splash.rule"                           = "Host(`${local.splash_host}`)"
-    "traefik.http.routers.${local.ws_name}-splash.entrypoints"                    = var.traefik_entrypoint
-    "traefik.http.routers.${local.ws_name}-splash.service"                        = "${local.ws_name}-splash"
-    "traefik.http.services.${local.ws_name}-splash.loadbalancer.server.port"      = "4000"
-
-    # ---- code-server on :13337 → <ws>-code.<domain> -----------------------
-    # Strip Accept-Encoding upstream + Sec-WebSocket-Extensions downstream so
-    # neither gzip nor permessage-deflate get negotiated. Without this,
-    # code-server's extension-host WS stream gets corrupted (Z_DATA_ERROR).
-    "traefik.http.routers.${local.ws_name}-code.rule"                             = "Host(`${local.code_host}`)"
-    "traefik.http.routers.${local.ws_name}-code.entrypoints"                      = var.traefik_entrypoint
-    "traefik.http.routers.${local.ws_name}-code.service"                          = "${local.ws_name}-code"
-    "traefik.http.routers.${local.ws_name}-code.middlewares"                      = "${local.ws_name}-code-noenc@docker"
-    "traefik.http.services.${local.ws_name}-code.loadbalancer.server.port"        = "13337"
-    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customrequestheaders.Accept-Encoding"   = ""
-    # Strip Sec-WebSocket-Extensions in BOTH directions: stripping only the
-    # response confirmation isn't enough — the upstream still encodes frames
-    # as permessage-deflate and the browser barfs (Z_DATA_ERROR / RSV1).
-    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customrequestheaders.Sec-WebSocket-Extensions"  = ""
-    "traefik.http.middlewares.${local.ws_name}-code-noenc.headers.customresponseheaders.Sec-WebSocket-Extensions" = ""
-
-    # ---- Coder bookkeeping (preserved from the previous template) ---------
-    "coder.owner"          = data.coder_workspace_owner.me.name
-    "coder.owner_id"       = data.coder_workspace_owner.me.id
-    "coder.workspace_id"   = data.coder_workspace.me.id
-    "coder.workspace_name" = data.coder_workspace.me.name
-  }
+  # Coder generates the bootstrap script from CODER_ACCESS_URL, which is the
+  # browser-facing HTTPS URL. Local workspace containers resolve lvh.me names
+  # on Docker DNS, so they should use the internal HTTP listener instead of
+  # trying HTTPS on the Coder container's :443.
+  agent_init_script = replace(coder_agent.main.init_script, local.public_coder_url, local.agent_coder_url)
 }
 
 ###############################################################################
@@ -174,7 +160,7 @@ resource "coder_agent" "main" {
   startup_script = <<-EOT
     set -e
     # 1. start code-server
-    code-server --auth none --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
+    code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
 
     # 2. on first boot only: scaffold mercato app + patch .env + install deps
     if [ ! -d "$HOME/app" ]; then
@@ -196,6 +182,8 @@ resource "coder_agent" "main" {
       grep -q '^APP_URL=' .env || echo "APP_URL=${local.app_url}" >> .env
       sed -i "s#^NEXT_PUBLIC_APP_URL=.*#NEXT_PUBLIC_APP_URL=${local.app_url}#" .env || true
       grep -q '^NEXT_PUBLIC_APP_URL=' .env || echo "NEXT_PUBLIC_APP_URL=${local.app_url}" >> .env
+      sed -i "s#^APP_ALLOWED_ORIGINS=.*#APP_ALLOWED_ORIGINS=${local.app_url}#" .env || true
+      grep -q '^APP_ALLOWED_ORIGINS=' .env || echo "APP_ALLOWED_ORIGINS=${local.app_url}" >> .env
       yarn install
       # Bootstrap the agentic AI tooling (Claude Code / Codex / opencode wiring)
       # so the dev box is ready for prompt-driven coding from the first start.
@@ -208,9 +196,90 @@ resource "coder_agent" "main" {
     # .env alone isn't enough because mercato's dev launcher spawns next in a
     # child process whose process.env lacks the .env-only vars at that phase.
     cd "$HOME/app"
+    # Open Mercato's dev launcher currently runs Next with NODE_ENV=production,
+    # which disables allowedDevOrigins unless we patch the generated config.
+    if grep -q "const allowedDevOrigins = isDevelopment ? resolveAllowedDevOrigins() : \\[\\]" next.config.ts 2>/dev/null; then
+      perl -0pi -e "s/const allowedDevOrigins = isDevelopment \\? resolveAllowedDevOrigins\\(\\) : \\[\\]/const allowedDevOrigins = resolveAllowedDevOrigins()/g" next.config.ts
+    fi
+    # The standalone splash currently trusts Next's local bind URL
+    # (`- Local: http://localhost:3000`) when it reports the current target.
+    # In this sandbox the browser-facing target is the Coder wildcard URL, so
+    # rewrite the generated runtime to prefer APP_URL / NEXT_PUBLIC_APP_URL.
+    if grep -q "const localMatch = line.match(/^- Local:\\\\s*(.+)$/)" scripts/dev-runtime.mjs 2>/dev/null \
+      && ! grep -q "resolveDisplayedRuntimeBaseUrl" scripts/dev-runtime.mjs 2>/dev/null; then
+node <<'NODE'
+const fs = require('fs')
+const runtimePath = 'scripts/dev-runtime.mjs'
+let source = fs.readFileSync(runtimePath, 'utf8')
+
+const helperMarker = `function readNonEmptyEnvValue(key) {
+  const value = process.env[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}`
+
+if (!source.includes(helperMarker)) {
+  console.warn('[sandbox] unable to patch splash display URL: helper marker not found')
+  process.exit(0)
+}
+
+const helperReplacement = helperMarker + `
+
+function normalizeRuntimeBaseUrl(value) {
+  if (typeof value !== 'string' || value.trim().length === 0) return null
+
+  try {
+    const parsed = new URL(value)
+    parsed.pathname = ''
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\\/$/, '')
+  } catch {
+    return null
+  }
+}
+
+function resolveDisplayedRuntimeBaseUrl(localUrl) {
+  return normalizeRuntimeBaseUrl(process.env.APP_URL)
+    ?? normalizeRuntimeBaseUrl(process.env.NEXT_PUBLIC_APP_URL)
+    ?? normalizeRuntimeBaseUrl(localUrl)
+}`
+source = source.replace(helperMarker, helperReplacement)
+
+const localStartNeedle = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)`
+const localStart = source.indexOf(localStartNeedle)
+const readyStart = source.indexOf('  const readyMatch = line.match', localStart)
+if (localStart === -1 || readyStart === -1) {
+  console.warn('[sandbox] unable to patch splash display URL: local URL block not found')
+  process.exit(0)
+}
+
+const localReplacement = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)
+  if (localMatch) {
+    const displayedUrl = resolveDisplayedRuntimeBaseUrl(localMatch[1]) ?? localMatch[1]
+    return {
+      type: 'status',
+      message: '🌐 App runtime at ' + displayedUrl,
+      splashPhase: startupSplashPhase,
+      splashDetail: 'Dev server is listening at ' + displayedUrl,
+      readyUrl: displayedUrl,
+      loginUrl: displayedUrl.replace(/\/$/, '') + '/login',
+      activity: 'App runtime at ' + displayedUrl,
+      progressCurrent: 4,
+      progressLabel: 'Precompiling login page',
+    }
+  }
+`
+
+source = source.slice(0, localStart) + localReplacement + source.slice(readyStart)
+fs.writeFileSync(runtimePath, source)
+NODE
+    fi
     export APP_URL="${local.app_url}"
     export NEXT_PUBLIC_APP_URL="${local.app_url}"
-    nohup env APP_URL="${local.app_url}" NEXT_PUBLIC_APP_URL="${local.app_url}" yarn setup >/tmp/mercato-dev.log 2>&1 &
+    export APP_ALLOWED_ORIGINS="${local.app_url}"
+    nohup env APP_URL="${local.app_url}" NEXT_PUBLIC_APP_URL="${local.app_url}" APP_ALLOWED_ORIGINS="${local.app_url}" yarn setup >/tmp/mercato-dev.log 2>&1 &
   EOT
 
   metadata {
@@ -246,24 +315,18 @@ resource "coder_app" "code-server" {
   agent_id     = coder_agent.main.id
   slug         = "code-server"
   display_name = "VS Code"
-  # external = true → Coder doesn't proxy code-server's WS at all; the browser
-  # hits the workspace directly via Traefik on `<ws>-code.<domain>`. This is
-  # the same model Codespaces uses (VS Code talks directly to the workspace,
-  # not through the control plane), and it avoids permessage-deflate / yamux
-  # double-framing problems that plague any WS-through-proxy chain.
-  external = true
-  url      = "${local.code_url}/?folder=/home/coder/app"
-  icon     = "/icon/code.svg"
-  open_in  = "tab"
+  external     = true
+  url          = "${local.code_url}/?folder=/home/coder/app"
+  icon         = "/icon/code.svg"
+  open_in      = "tab"
 }
 
 resource "coder_app" "splash" {
   agent_id     = coder_agent.main.id
   slug         = "splash"
   display_name = "Mercato Splash"
-  # `external = true` means Coder doesn't proxy — the user's browser hits the
-  # caddy-published subdomain directly. caddy reverse-proxies into the
-  # container's :4000 over the shared mercato-proxy network.
+  # Browser hits the wildcard URL on port 4000; Coder proxies into the
+  # workspace container.
   external = true
   url      = local.splash_url
   icon     = "/icon/widgets.svg"
@@ -274,10 +337,12 @@ resource "coder_app" "app" {
   agent_id     = coder_agent.main.id
   slug         = "app"
   display_name = "Mercato App"
-  external     = true
-  url          = local.app_url
-  icon         = "/icon/widgets.svg"
-  open_in      = "tab"
+  # Browser hits the wildcard URL on port 3000; Coder proxies into the
+  # workspace container.
+  external = true
+  url      = local.app_url
+  icon     = "/icon/widgets.svg"
+  open_in  = "tab"
 }
 
 ###############################################################################
@@ -317,8 +382,7 @@ resource "docker_network" "workspace" {
 }
 
 # Pre-existing shared network (created by docker-compose.yml as
-# `mercato-proxy`). caddy-docker-proxy listens on it; every workspace joins
-# so caddy can reach the workspace by container alias.
+# `mercato-proxy`). The shared edge proxy and Coder both live on it.
 data "docker_network" "proxy" {
   name = "mercato-proxy"
 }
@@ -374,17 +438,19 @@ resource "docker_container" "postgres" {
 
 ###############################################################################
 # Workspace container — mercato-workspace:latest, agent token injected as env,
-# entrypoint = agent init script with localhost rewrites for macOS host.
+# entrypoint = agent init script.
 #
 # Two networks:
 #   * docker_network.workspace  → talks to sidecar postgres (workspace-pg)
-#   * mercato-proxy             → caddy-docker-proxy reaches :3000 / :4000
+#   * mercato-proxy             → agent reaches Coder via the
+#                                 `coder.<sandbox_domain>` Docker DNS alias
+#                                 directly over the docker network
 #
-# Caddy labels (read by lucaslorentz/caddy-docker-proxy):
-#   caddy_0           = <name>.<sandbox_domain>          → reverse_proxy :3000
-#   caddy_1           = <name>-splash.<sandbox_domain>   → reverse_proxy :4000
-# We use indexed `caddy_N` keys so two independent vhosts can be configured on
-# one container. caddy auto-handles WebSocket upgrade — Next.js HMR works.
+# No edge-proxy labels are emitted on this container. Workspace ports are reached
+# through Coder's wildcard access URL (`*.{wildcard_apps_domain}`); Coder
+# itself proxies the browser → workspace port hop. The edge proxy only routes the
+# `*.apps.<DOMAIN>` host header to Coder — it does not need to know
+# anything per-workspace.
 ###############################################################################
 
 resource "docker_container" "workspace" {
@@ -395,12 +461,10 @@ resource "docker_container" "workspace" {
   hostname = data.coder_workspace.me.name
   memory   = 16384
 
-  # The agent's init script uses CODER_ACCESS_URL (= http://coder.sandbox.lvh.me)
-  # which Docker DNS resolves to the coder container's IP on mercato-proxy.
-  # Coder listens on :80 inside that container (see CODER_HTTP_ADDRESS in
-  # docker-compose.yml), so the agent reaches it directly without going through
-  # Traefik. No localhost rewrite needed.
-  entrypoint = ["sh", "-c", coder_agent.main.init_script]
+  # Browser traffic uses HTTPS via nginx, but the agent bootstrap runs inside
+  # Docker. Rewriting the generated script to local.agent_coder_url lets fresh
+  # workspaces download/connect the agent over the shared Docker network.
+  entrypoint = ["sh", "-c", local.agent_init_script]
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
@@ -414,7 +478,7 @@ resource "docker_container" "workspace" {
     aliases = ["workspace"]
   }
 
-  # Shared proxy network — Traefik reaches us by container name.
+  # Shared proxy network — the edge proxy reaches us by container name.
   networks_advanced {
     name    = data.docker_network.proxy.name
     aliases = [data.coder_workspace.me.name]
@@ -428,11 +492,8 @@ resource "docker_container" "workspace" {
   # NOTE: do NOT pin coder.<sandbox_domain> in /etc/hosts here. The workspace
   # is on the shared `mercato-proxy` network where the coder service has the
   # alias `coder.<sandbox_domain>` (set in docker-compose.yml). Letting Docker
-  # DNS resolve the name means the agent reaches Coder DIRECTLY via the docker
-  # network, bypassing Traefik. This is critical: Traefik can't reliably strip
-  # `Sec-WebSocket-Extensions`, and Coder's nhooyr.io/websocket negotiates
-  # permessage-deflate → RSV1 frames → yamux "unexpected rsv bits" → agent
-  # dies seconds after connecting.
+  # DNS resolve the name means the agent reaches Coder directly via the docker
+  # network, independent of browser-facing TLS termination.
 
   volumes {
     container_path = "/home/coder"
@@ -440,13 +501,22 @@ resource "docker_container" "workspace" {
     read_only      = false
   }
 
-  # All Traefik + bookkeeping labels are defined in `local.workspace_labels`
-  # above; emit them via a single dynamic block.
-  dynamic "labels" {
-    for_each = local.workspace_labels
-    content {
-      label = labels.key
-      value = labels.value
-    }
+  # Coder bookkeeping labels.
+  labels {
+    label = "coder.owner"
+    value = data.coder_workspace_owner.me.name
   }
+  labels {
+    label = "coder.owner_id"
+    value = data.coder_workspace_owner.me.id
+  }
+  labels {
+    label = "coder.workspace_id"
+    value = data.coder_workspace.me.id
+  }
+  labels {
+    label = "coder.workspace_name"
+    value = data.coder_workspace.me.name
+  }
+
 }

@@ -3,102 +3,54 @@
 # Activate with:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# What this changes vs. local dev:
-#   * traefik: enable the websecure (:443) entrypoint with Let's Encrypt
-#     ACME via Cloudflare DNS-01. One wildcard cert for *.${SANDBOX_DOMAIN}
-#     (+ apex SAN) is issued on first start and reused for every workspace
-#     subdomain — no per-host ACME round-trips, no rate-limit risk during a
-#     burst of new sandboxes.
-#   * coder: pinned to a release tag (overridable via CODER_IMAGE_TAG) so we
-#     don't pick up untested upstream changes on a redeploy.
-#   * postgres-onboarding: NOT exposed on the host — only accessible inside
-#     the docker network. The onboarding app reaches it by service name.
-#   * onboarding: NODE_ENV=production already comes from the base file; here
-#     we add restart=always.
+# The base compose file now uses the same shape locally and in production:
+# one nginx edge on :80/:443, Coder behind it on the Docker network, and
+# Coder's native wildcard app proxy for workspace ports. In production, put
+# a real wildcard certificate/key in .runtime/tls/sandbox-lvh-me.{crt,key}
+# before starting the stack. The certificate must cover:
+#   - ${SANDBOX_DOMAIN}
+#   - *.${SANDBOX_DOMAIN}
+#   - *.apps.${SANDBOX_DOMAIN}
 #
 # DATA-PRESERVATION CONTRACT
 # --------------------------
-# Every persistent dataset is a NAMED volume declared in docker-compose.yml:
-#   * postgres-coder-data         (Coder metadata)
-#   * postgres-onboarding-data    (onboarding users/sandboxes)
-#   * coder-data                  (Coder server state)
-# Plus a host-mounted ./.runtime/letsencrypt-acme.json for Traefik's ACME
-# storage (so cert state survives a `down`+`up` cycle).
-# scripts/deploy-hetzner.sh NEVER calls `docker compose down -v`,
+# Persistent datasets are named volumes declared in docker-compose.yml:
+#   * postgres-coder-data
+#   * postgres-onboarding-data
+#   * coder-data
+# scripts/deploy-hetzner.sh must never call `docker compose down -v`,
 # `docker volume rm`, or `docker system prune --volumes`.
 
 name: mercato-sandboxes
 
 services:
-  traefik:
-    image: traefik:${TRAEFIK_IMAGE_TAG:-v3.4}
-    restart: always
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=mercato-proxy
-      - --entrypoints.web.address=:80
-      # Force HTTP→HTTPS redirect so the wildcard cert is the only path in.
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.websecure.address=:443
-      # Default TLS for every websecure router → use the cloudflare resolver
-      # to fetch the wildcard cert. Workspace labels don't need per-router
-      # tls config — they just attach to entrypoint=websecure.
-      - --entrypoints.websecure.http.tls=true
-      - --entrypoints.websecure.http.tls.certresolver=cloudflare
-      - --entrypoints.websecure.http.tls.domains[0].main=${SANDBOX_DOMAIN}
-      - --entrypoints.websecure.http.tls.domains[0].sans=*.${SANDBOX_DOMAIN}
-      # ACME via Cloudflare DNS-01 — issues *.${SANDBOX_DOMAIN} + apex.
-      - --certificatesresolvers.cloudflare.acme.email=${TRAEFIK_ACME_EMAIL:?TRAEFIK_ACME_EMAIL must be set in .env.production}
-      - --certificatesresolvers.cloudflare.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.cloudflare.acme.dnschallenge=true
-      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
-      # Generous DNS propagation wait so first issuance from a cold start
-      # tolerates Cloudflare's ~30 s replication.
-      - --certificatesresolvers.cloudflare.acme.dnschallenge.delaybeforecheck=30
-      - --certificatesresolvers.cloudflare.acme.caserver=${TRAEFIK_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
-      # Dashboard off in prod (no --api.insecure).
-      - --api.dashboard=false
-      - --log.level=INFO
-      - --accesslog=true
-    environment:
-      # Cloudflare API token for DNS-01. Traefik's cloudflare provider reads
-      # CF_DNS_API_TOKEN directly from the environment.
-      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:?CF_DNS_API_TOKEN must be set in .env.production}
-    ports: !reset
-      - "${TRAEFIK_HTTP_PORT:-80}:80"
-      - "${TRAEFIK_HTTPS_PORT:-443}:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./.runtime/letsencrypt-acme.json:/letsencrypt/acme.json
-
   coder:
-    image: ghcr.io/coder/coder:${CODER_IMAGE_TAG:-v2.21.3}
+    image: ghcr.io/coder/coder:${CODER_IMAGE_TAG:-v2.32.0}
     restart: always
     environment:
       CODER_ACCESS_URL: ${CODER_ACCESS_URL:?CODER_ACCESS_URL required in prod}
-      CODER_WILDCARD_ACCESS_URL: ${CODER_WILDCARD_ACCESS_URL:-}
+      CODER_WILDCARD_ACCESS_URL: ${CODER_WILDCARD_ACCESS_URL:?CODER_WILDCARD_ACCESS_URL required in prod}
       CODER_TELEMETRY_ENABLE: "false"
-    labels:
-      # Override the dev `entrypoints=web` label — prod terminates TLS at
-      # Traefik's websecure entrypoint and reuses the wildcard cert.
-      traefik.http.routers.coder.entrypoints: websecure
+
+  edge:
+    restart: always
+    environment:
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:?SANDBOX_DOMAIN required in prod}
+      WILDCARD_APPS_DOMAIN: ${WILDCARD_APPS_DOMAIN:?WILDCARD_APPS_DOMAIN required in prod}
+      PROXY_SCHEME: https
 
   onboarding:
     restart: always
     environment:
       NODE_ENV: production
       CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:?CODER_PUBLIC_URL required in prod}
-    # No host port mapping — onboarding is published by Traefik on
+      COOKIE_SECURE: "true"
+    # No extra public onboarding port in production; the nginx edge publishes
     # https://${SANDBOX_DOMAIN}.
     ports: !reset []
-    labels:
-      traefik.http.routers.onboarding.entrypoints: websecure
 
   postgres-onboarding:
-    # In prod the onboarding DB is NOT exposed on the host — only the
-    # onboarding container in the same docker network can reach it.
+    # In prod the onboarding DB is not exposed on the host.
     ports: !reset []
     restart: always
 

@@ -29,12 +29,16 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
 ┌────────────────────── docker compose (host) ──────────────────────┐
 │                                                                   │
 │  postgres-onboarding   postgres-coder    coder-server             │
-│  :5545                 :5432 (internal)  :7080                    │
+│  :5545                 :5432 (internal)  :80 internal             │
 │         ▲                     ▲              ▲                    │
 │         │                     │              │                    │
 │  next-onboarding (3000) ──────┼──────────────┘                    │
 │         │ admin API token                                         │
 │         │                                                         │
+│  nginx edge: :80 redirect-only, :443 HTTPS/WSS                    │
+│    sandbox.lvh.me → onboarding, coder.sandbox.lvh.me → Coder,     │
+│    *.apps.sandbox.lvh.me → Coder wildcard app proxy               │
+│                                                                   │
 │  bind-mount: /var/run/docker.sock ──────────────────────────────► │
 │         (coder-server uses host Docker daemon to spawn workspaces)│
 └───────────────────────────────────────────────────────────────────┘
@@ -53,8 +57,9 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
 |-----------------------|----------------------------------|----------------------------------------------------------|
 | `postgres-onboarding` | `postgres:17-alpine`             | Onboarding app's user + sandbox tables                   |
 | `postgres-coder`      | `postgres:17`                    | Coder control-plane metadata DB                          |
-| `coder`               | `ghcr.io/coder/coder:latest`     | Coder server on `:7080`; spawns workspaces via host Docker |
+| `coder`               | `ghcr.io/coder/coder:latest`     | Coder server on internal `:80`; spawns workspaces via host Docker |
 | `onboarding`          | `node:24-alpine` (custom build)  | Next.js 15 signup + dashboard UI on `:3000`              |
+| `edge`                | `nginx:alpine`                   | Standard-port HTTPS/WSS edge for onboarding, Coder, and wildcard apps |
 
 ## 🎯 What you get per signup
 
@@ -71,19 +76,19 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
 ```bash
 cp .env.example .env       # set OPENAI_API_KEY (and optionally ANTHROPIC_API_KEY)
 ./start.sh                 # ~3 min on first run, ~30 s afterwards
-open http://localhost:3000 # sign up and create your sandbox
+open https://sandbox.lvh.me # sign up and create your sandbox
 ```
 
 > **First run takes ~3 min** — Coder has to boot, the workspace image has to build, and the template has to be pushed. Subsequent `./start.sh` runs are idempotent and finish in ~30 s.
 
 ## 🔑 Logging in
 
-- **Onboarding** (your users) — http://localhost:3000 — any email + 8+ character password.
-- **Coder admin** (operators) — http://localhost:7080 — `admin@local.dev` / `Sup3rSecret!`.
+- **Onboarding** (your users) — `https://sandbox.lvh.me` — any email + 8+ character password.
+- **Coder admin** (operators) — `https://coder.sandbox.lvh.me` — `admin@local.dev` / `Sup3rSecret!`.
 
 ## 🧭 End-user flow
 
-1. Sign up at http://localhost:3000.
+1. Sign up at `https://sandbox.lvh.me`.
 2. Land on the dashboard.
 3. Click **Create sandbox**, give it a name, submit.
 4. Wait ~30–60 s for status to flip to **ready**.
@@ -91,24 +96,42 @@ open http://localhost:3000 # sign up and create your sandbox
 
 ## 🌐 Networking
 
-Each workspace gets two stable URLs on the host's standard 80/443, served by `caddy-docker-proxy` reading docker labels off each workspace container:
+The stack is published by one nginx edge proxy on standard ports. HTTP on
+`:80` redirects to HTTPS on `:443`; all interactive traffic uses HTTPS/WSS.
 
-- App:    `http://<workspace>.<SANDBOX_DOMAIN>`         → container `:3000`
-- Splash: `http://<workspace>-splash.<SANDBOX_DOMAIN>`  → container `:4000`
+- Onboarding: `https://sandbox.lvh.me`
+- Coder: `https://coder.sandbox.lvh.me`
+- App: `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me`
+- Splash: `https://4000--main--<workspace>--<user>.apps.sandbox.lvh.me`
+- VS Code: `https://13337--main--<workspace>--<user>.apps.sandbox.lvh.me/?folder=/home/coder/app`
+- Terminal: `https://coder.sandbox.lvh.me/@<user>/<workspace>/terminal`
 
-Local dev uses `SANDBOX_DOMAIN=lvh.me` (default), which wildcards every subdomain to `127.0.0.1` — no `/etc/hosts` edits, no DNS, no certs needed. Open `http://my-sandbox.lvh.me` in the browser and you hit the workspace's Mercato app directly. WebSocket upgrade (Next.js HMR, Coder agent) is handled by caddy automatically.
+Local dev uses `SANDBOX_DOMAIN=sandbox.lvh.me`, which wildcards every
+subdomain to `127.0.0.1`; no `/etc/hosts` edits are required. `./start.sh`
+generates `.runtime/tls/sandbox-lvh-me.crt` and
+`.runtime/tls/sandbox-lvh-me.key` if they are missing. Trust the certificate in
+your OS/browser keychain to remove privacy warnings.
+
+Fresh workspace agents do not use the browser-facing HTTPS URL to bootstrap.
+The template rewrites Coder's generated agent script to the internal Docker
+network URL `http://coder.${SANDBOX_DOMAIN}` by default (`AGENT_CODER_URL` can
+override this). This is required locally because `coder.sandbox.lvh.me` resolves
+to the Coder container on Docker DNS, where `:443` is intentionally not open.
 
 For production:
 
 ```
-SANDBOX_DOMAIN=sandbox.example.com   # add a *.sandbox.example.com wildcard A record
-CADDY_SCHEME=https
-CADDY_ACME_EMAIL=ops@example.com     # caddy issues LetsEncrypt certs automatically
+SANDBOX_DOMAIN=sandbox.example.com
+WILDCARD_APPS_DOMAIN=apps.sandbox.example.com
+CODER_ACCESS_URL=https://coder.sandbox.example.com
+CODER_PUBLIC_URL=https://coder.sandbox.example.com
+CODER_WILDCARD_ACCESS_URL=*.apps.sandbox.example.com
+PROXY_SCHEME=https
+COOKIE_SECURE=true
 ```
 
-If 80/443 are already in use on the host, override `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` and set `CADDY_PORT_SUFFIX=:8080` so the URLs the onboarding UI renders match.
-
-VS Code (`code-server`) and the web terminal still use Coder's path-based proxy (`http://localhost:7080/@<owner>/<workspace>/...`) — no subdomain needed since they handle path prefixes natively.
+Production TLS must cover `${SANDBOX_DOMAIN}`, `*.${SANDBOX_DOMAIN}`, and
+`*.apps.${SANDBOX_DOMAIN}`.
 
 ## ⏱️ "Ready" semantics
 
@@ -141,7 +164,7 @@ $EDITOR .env.production         # CLOUDFLARE_API_TOKEN, JWT_SECRET, passwords
 ./scripts/deploy-hetzner.sh
 ```
 
-See **[SPEC-PROD.md](./SPEC-PROD.md)** for the canonical production spec —
+See **[.ai/SPEC-PROD.md](./.ai/SPEC-PROD.md)** for the canonical production spec —
 DNS prerequisites, the wildcard-TLS architecture, the data-preservation
 contract, and the operational runbook.
 
@@ -176,17 +199,20 @@ make test    # run the Playwright happy-path suite
 │   └── workspace-image/  Dockerfile for mercato-workspace:latest
 ├── scripts/              bootstrap-coder, build-workspace-image, push-template, migrate-onboarding
 ├── e2e/                  Playwright happy-path suite
-├── docker-compose.yml    postgres-onboarding, postgres-coder, coder, onboarding
+├── proxy/                nginx edge config template
+├── .ai/                  specs, worklist, handoff notes
+├── AGENTS.md             coding standards + operational lessons for agents
+├── docker-compose.yml    postgres-onboarding, postgres-coder, coder, onboarding, edge
 ├── start.sh / stop.sh / reset.sh
 ├── Makefile
-└── SPEC.md               Full design spec
+└── README.md
 ```
 
 ## 🚫 Out of scope (POC)
 
 - Email delivery (we surface the temp Coder password on screen rather than emailing).
 - Multi-tenancy / orgs in Coder (single default org).
-- TLS termination at caddy beyond out-of-the-box LetsEncrypt (no custom certs / mTLS).
+- Certificate automation for production TLS. The stack expects cert/key files mounted under `.runtime/tls`.
 - Production hardening (TLS, secret management, OIDC).
 
 ## 📜 License

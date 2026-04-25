@@ -53,12 +53,14 @@ VAR_ARGS=()
 add_var() {
   VAR_ARGS+=("--variable" "$1=$2")
 }
-[ -n "${OPENAI_API_KEY:-}" ]      && add_var openai_api_key      "$OPENAI_API_KEY"
-[ -n "${ANTHROPIC_API_KEY:-}" ]   && add_var anthropic_api_key   "$ANTHROPIC_API_KEY"
-[ -n "${SANDBOX_DOMAIN:-}" ]      && add_var sandbox_domain      "$SANDBOX_DOMAIN"
-[ -n "${PROXY_SCHEME:-}" ]        && add_var proxy_scheme        "$PROXY_SCHEME"
-[ "${PROXY_PORT_SUFFIX+x}" = "x" ] && add_var proxy_port_suffix  "${PROXY_PORT_SUFFIX}"
-[ -n "${TRAEFIK_ENTRYPOINT:-}" ]  && add_var traefik_entrypoint  "$TRAEFIK_ENTRYPOINT"
+[ -n "${OPENAI_API_KEY:-}" ]        && add_var openai_api_key       "$OPENAI_API_KEY"
+[ -n "${ANTHROPIC_API_KEY:-}" ]     && add_var anthropic_api_key    "$ANTHROPIC_API_KEY"
+[ -n "${SANDBOX_DOMAIN:-}" ]        && add_var sandbox_domain       "$SANDBOX_DOMAIN"
+[ -n "${WILDCARD_APPS_DOMAIN:-}" ]  && add_var wildcard_apps_domain "$WILDCARD_APPS_DOMAIN"
+[ -n "${PROXY_SCHEME:-}" ]          && add_var proxy_scheme         "$PROXY_SCHEME"
+[ -n "${CODER_PUBLIC_URL:-}" ]      && add_var coder_public_url     "$CODER_PUBLIC_URL"
+[ -n "${AGENT_CODER_URL:-}" ]       && add_var agent_coder_url      "$AGENT_CODER_URL"
+[ "${PROXY_PORT_SUFFIX+x}" = "x" ]  && add_var proxy_port_suffix    "${PROXY_PORT_SUFFIX}"
 
 VERSION_NAME="v-$(date +%s)"
 

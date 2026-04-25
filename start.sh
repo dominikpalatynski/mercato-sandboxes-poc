@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # start.sh — idempotent bring-up for the Mercato Sandboxes POC.
 #
-# Steps (per SPEC.md §5):
+# Steps (per .ai/SPEC.md §5):
 #   1. compose up coder + both postgres, wait for healthchecks
 #   2. scripts/bootstrap-coder.sh   (task #4)  - mints admin API token -> .runtime/coder-admin-token
 #   3. scripts/build-workspace-image.sh (task #2) - builds mercato-workspace:latest
@@ -35,7 +35,6 @@ read_env() {
   echo "${val:-$default}"
 }
 
-CODER_HTTP_PORT=$(read_env CODER_HTTP_PORT 7080)
 CODER_FIRST_USER_EMAIL=$(read_env CODER_FIRST_USER_EMAIL admin@local.dev)
 CODER_FIRST_USER_PASSWORD=$(read_env CODER_FIRST_USER_PASSWORD 'Sup3rSecret!')
 ONBOARDING_HTTP_PORT=$(read_env ONBOARDING_HTTP_PORT 3000)
@@ -43,15 +42,30 @@ ONBOARDING_DB_PORT=$(read_env ONBOARDING_DB_PORT 5544)
 ONBOARDING_DB_USER=$(read_env ONBOARDING_DB_USER onboarding)
 ONBOARDING_DB_PASSWORD=$(read_env ONBOARDING_DB_PASSWORD onboarding)
 ONBOARDING_DB_NAME=$(read_env ONBOARDING_DB_NAME onboarding)
-SANDBOX_DOMAIN=$(read_env SANDBOX_DOMAIN lvh.me)
-PROXY_SCHEME=$(read_env PROXY_SCHEME http)
+SANDBOX_DOMAIN=$(read_env SANDBOX_DOMAIN sandbox.lvh.me)
+WILDCARD_APPS_DOMAIN=$(read_env WILDCARD_APPS_DOMAIN apps.sandbox.lvh.me)
+PROXY_SCHEME=$(read_env PROXY_SCHEME https)
 PROXY_PORT_SUFFIX=$(read_env PROXY_PORT_SUFFIX '')
 TRAEFIK_HTTP_PORT=$(read_env TRAEFIK_HTTP_PORT 80)
+TRAEFIK_HTTPS_PORT=$(read_env TRAEFIK_HTTPS_PORT 443)
 
 mkdir -p .runtime
 
-echo "[start] bringing up control-plane services (coder + postgres + traefik)…"
-docker compose up -d postgres-coder postgres-onboarding coder traefik
+TLS_DIR=".runtime/tls"
+TLS_CERT="${TLS_DIR}/sandbox-lvh-me.crt"
+TLS_KEY="${TLS_DIR}/sandbox-lvh-me.key"
+if [ ! -f "$TLS_CERT" ] || [ ! -f "$TLS_KEY" ]; then
+  echo "[start] generating local TLS certificate for ${SANDBOX_DOMAIN}…"
+  mkdir -p "$TLS_DIR"
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+    -keyout "$TLS_KEY" \
+    -out "$TLS_CERT" \
+    -subj "/CN=${SANDBOX_DOMAIN}" \
+    -addext "subjectAltName=DNS:${SANDBOX_DOMAIN},DNS:*.${SANDBOX_DOMAIN},DNS:${WILDCARD_APPS_DOMAIN},DNS:*.${WILDCARD_APPS_DOMAIN}" >/dev/null 2>&1
+fi
+
+echo "[start] bringing up control-plane services (coder + postgres + edge)…"
+docker compose up -d postgres-coder postgres-onboarding coder edge
 
 echo "[start] waiting for services to become healthy (timeout: 120s)…"
 deadline=$(( $(date +%s) + 120 ))
@@ -133,11 +147,13 @@ cat <<EOF
   Coder admin:  ${PROXY_SCHEME}://coder.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}
                 (admin: ${CODER_FIRST_USER_EMAIL} / ${CODER_FIRST_USER_PASSWORD})
   Onboarding:   ${PROXY_SCHEME}://${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}
-  Workspaces:   ${PROXY_SCHEME}://<workspace>.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}        (app)
-                ${PROXY_SCHEME}://<workspace>-splash.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX} (splash)
-                ${PROXY_SCHEME}://<workspace>-code.${SANDBOX_DOMAIN}${PROXY_PORT_SUFFIX}   (VS Code)
-                Traefik dashboard: http://localhost:${TRAEFIK_DASHBOARD_PORT:-8080}/dashboard/
+  Workspaces:   ${PROXY_SCHEME}://3000--main--<ws>--<user>.${WILDCARD_APPS_DOMAIN:-apps.sandbox.lvh.me}${PROXY_PORT_SUFFIX}  (app)
+                ${PROXY_SCHEME}://4000--main--<ws>--<user>.${WILDCARD_APPS_DOMAIN:-apps.sandbox.lvh.me}${PROXY_PORT_SUFFIX}  (splash)
+                ${PROXY_SCHEME}://13337--main--<ws>--<user>.${WILDCARD_APPS_DOMAIN:-apps.sandbox.lvh.me}${PROXY_PORT_SUFFIX} (VS Code)
 
   Onboarding DB: postgres://${ONBOARDING_DB_USER}:${ONBOARDING_DB_PASSWORD}@localhost:${ONBOARDING_DB_PORT}/${ONBOARDING_DB_NAME}
+
+  Local TLS cert: ${TLS_CERT}
+  If your browser shows a privacy warning, trust this certificate in your OS keychain.
 
 EOF

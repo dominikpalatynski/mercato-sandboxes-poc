@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bootstrap-coder.sh — idempotent Coder admin bootstrap.
 #
-# Per SPEC.md §5 step 2:
+# Per .ai/SPEC.md §5 step 2:
 #   1. wait for Coder /healthz
 #   2. if .runtime/coder-admin-token exists and still valid -> noop
 #   3. else: create first admin (if missing), login, mint long-lived API token,
@@ -13,7 +13,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CODER_URL="${CODER_URL:-${CODER_ACCESS_URL:-http://coder.sandbox.lvh.me}}"
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
+CODER_URL="${CODER_URL:-${CODER_ACCESS_URL:-https://coder.sandbox.lvh.me}}"
+CURL_TLS_ARGS=()
+if [ "${CODER_SKIP_TLS_VERIFY:-true}" = "true" ]; then
+  CURL_TLS_ARGS=(-k)
+fi
 RUNTIME_DIR=".runtime"
 TOKEN_FILE="${RUNTIME_DIR}/coder-admin-token"
 TOKEN_NAME="onboarding-app"
@@ -33,7 +44,7 @@ mkdir -p "$RUNTIME_DIR"
 echo "[bootstrap-coder] waiting for ${CODER_URL}/healthz (up to 120s)…"
 deadline=$(( $(date +%s) + 120 ))
 while :; do
-  if curl -fsS -o /dev/null "${CODER_URL}/healthz"; then
+  if curl "${CURL_TLS_ARGS[@]}" -fsSL -o /dev/null "${CODER_URL}/healthz"; then
     echo "[bootstrap-coder] coder is up."
     break
   fi
@@ -48,7 +59,7 @@ done
 if [ -f "$TOKEN_FILE" ]; then
   existing_token="$(cat "$TOKEN_FILE")"
   if [ -n "$existing_token" ]; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' \
+    code="$(curl "${CURL_TLS_ARGS[@]}" -sL -o /dev/null -w '%{http_code}' \
       -H "Coder-Session-Token: ${existing_token}" \
       "${CODER_URL}/api/v2/users/me" || echo "000")"
     if [ "$code" = "200" ]; then
@@ -59,20 +70,12 @@ if [ -f "$TOKEN_FILE" ]; then
   fi
 fi
 
-# 3. Load .env so CODER_FIRST_USER_* vars are available
-if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ./.env
-  set +a
-fi
-
 EMAIL="${CODER_FIRST_USER_EMAIL:-admin@local.dev}"
 USERNAME="${CODER_FIRST_USER_USERNAME:-admin}"
 PASSWORD="${CODER_FIRST_USER_PASSWORD:-Sup3rSecret!}"
 
 # 4. Check if first user exists; create if not.
-first_code="$(curl -s -o /dev/null -w '%{http_code}' "${CODER_URL}/api/v2/users/first" || echo "000")"
+first_code="$(curl "${CURL_TLS_ARGS[@]}" -sL -o /dev/null -w '%{http_code}' "${CODER_URL}/api/v2/users/first" || echo "000")"
 if [ "$first_code" = "404" ]; then
   echo "[bootstrap-coder] no admin yet; creating first user (${EMAIL})…"
   create_body="$(jq -n \
@@ -81,7 +84,7 @@ if [ "$first_code" = "404" ]; then
     --arg name "$USERNAME" \
     --arg password "$PASSWORD" \
     '{email:$email, username:$username, name:$name, password:$password, trial:false}')"
-  create_resp="$(curl -sS -X POST \
+  create_resp="$(curl "${CURL_TLS_ARGS[@]}" -sSL -X POST \
     -H "Content-Type: application/json" \
     -d "$create_body" \
     "${CODER_URL}/api/v2/users/first")"
@@ -101,7 +104,7 @@ fi
 # 5. Login -> session_token
 login_body="$(jq -n --arg email "$EMAIL" --arg password "$PASSWORD" \
   '{email:$email, password:$password}')"
-login_resp="$(curl -sS -X POST \
+login_resp="$(curl "${CURL_TLS_ARGS[@]}" -sSL -X POST \
   -H "Content-Type: application/json" \
   -d "$login_body" \
   "${CODER_URL}/api/v2/users/login")"
@@ -117,7 +120,7 @@ token_body="$(jq -n \
   --arg name "$TOKEN_NAME" \
   --argjson lifetime "$TOKEN_LIFETIME_NS" \
   '{token_name:$name, scope:"all", lifetime:$lifetime}')"
-token_resp="$(curl -sS -X POST \
+token_resp="$(curl "${CURL_TLS_ARGS[@]}" -sSL -X POST \
   -H "Content-Type: application/json" \
   -H "Coder-Session-Token: ${session_token}" \
   -d "$token_body" \
@@ -130,7 +133,7 @@ if [ -z "$api_key" ]; then
 fi
 
 # 7. Verify the new token works
-verify_code="$(curl -s -o /dev/null -w '%{http_code}' \
+verify_code="$(curl "${CURL_TLS_ARGS[@]}" -sL -o /dev/null -w '%{http_code}' \
   -H "Coder-Session-Token: ${api_key}" \
   "${CODER_URL}/api/v2/users/me" || echo "000")"
 if [ "$verify_code" != "200" ]; then

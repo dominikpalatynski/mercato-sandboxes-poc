@@ -35,7 +35,7 @@ runs reuse the cache.
 ## Notes
 
 - One worker, serial execution: only one workspace at a time fits within the
-  POC's disk budget (see `SPEC.md` §8).
+  POC's disk budget (see `.ai/SPEC.md` §8).
 - Per-test timeout is 10 minutes — workspace provisioning on a cold cache
   (npx create-mercato-app + yarn install) can take several minutes.
 - On failure, see `playwright-report/index.html` for traces, screenshots, and

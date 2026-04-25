@@ -43,8 +43,9 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  // Terminal states: don't re-poll Coder.
-  if (sandbox.status === 'ready' || sandbox.status === 'failed') {
+  // Failed sandboxes are terminal. Ready sandboxes are still re-polled once on
+  // demand so older DB rows can self-heal after routing changes.
+  if (sandbox.status === 'failed') {
     return NextResponse.json(sandbox);
   }
 
@@ -84,25 +85,18 @@ export async function GET(
       cs.lifecycleState === 'ready'
         ? 'Workspace ready'
         : `Workspace usable (lifecycle: ${cs.lifecycleState})`;
-    // Path-based fallbacks (used when apps[] hasn't fully populated yet).
-    const links = buildLinks({
-      coderPublicUrl,
-      ownerName: cs.ownerName,
-      name: cs.name,
-    });
-    // Prefer the resolved URL from the apps[] list (handles external apps with
-    // direct host port URLs); fall back to the path-based link.
+    // App, splash, and VS Code all come from Coder's external app URLs.
+    // Terminal stays path-based on the main Coder origin.
     newVscode =
       resolveAppUrl({ apps: cs.apps, slug: 'code-server', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      links.vscode;
+      sandbox.vscode_url;
     newApp =
       resolveAppUrl({ apps: cs.apps, slug: 'app', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      links.app;
+      sandbox.app_url;
     newSplash =
       resolveAppUrl({ apps: cs.apps, slug: 'splash', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      links.splash;
-    // Terminal is always path-based (Coder's web terminal, not a coder_app).
-    newTerminal = links.terminal;
+      sandbox.splash_url;
+    newTerminal = buildLinks({ coderPublicUrl, ownerName: cs.ownerName, name: cs.name }).terminal;
   } else {
     newStatus = 'building';
     newMessage = `job=${cs.jobStatus}${cs.lifecycleState ? `, lifecycle=${cs.lifecycleState}` : ''}`;
