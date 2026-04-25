@@ -61,7 +61,7 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
 - 🖥️ Browser-based **VS Code** (code-server)
 - 💻 Web **terminal**
 - ⚙️ Live **build splash** on port 4000
-- 🚀 The Mercato **app** on port 3000 (direct port forward — no path-prefix issues)
+- 🚀 The Mercato **app** on its own subdomain (`<workspace>.lvh.me` locally, `<workspace>.<your-domain>` in prod) — full asset URLs, WebSockets, no path-prefix surprises
 - 🤖 **opencode**, **codex**, and **claude code** CLIs preinstalled
 - 🐘 Sidecar **PostgreSQL 17 (pgvector)**
 - 💪 **16 GB RAM** allocation per workspace
@@ -88,6 +88,27 @@ open http://localhost:3000 # sign up and create your sandbox
 3. Click **Create sandbox**, give it a name, submit.
 4. Wait ~30–60 s for status to flip to **ready**.
 5. Click into **VS Code**, **Terminal**, **Splash**, or **App**.
+
+## 🌐 Networking
+
+Each workspace gets two stable URLs on the host's standard 80/443, served by `caddy-docker-proxy` reading docker labels off each workspace container:
+
+- App:    `http://<workspace>.<SANDBOX_DOMAIN>`         → container `:3000`
+- Splash: `http://<workspace>-splash.<SANDBOX_DOMAIN>`  → container `:4000`
+
+Local dev uses `SANDBOX_DOMAIN=lvh.me` (default), which wildcards every subdomain to `127.0.0.1` — no `/etc/hosts` edits, no DNS, no certs needed. Open `http://my-sandbox.lvh.me` in the browser and you hit the workspace's Mercato app directly. WebSocket upgrade (Next.js HMR, Coder agent) is handled by caddy automatically.
+
+For production:
+
+```
+SANDBOX_DOMAIN=sandbox.example.com   # add a *.sandbox.example.com wildcard A record
+CADDY_SCHEME=https
+CADDY_ACME_EMAIL=ops@example.com     # caddy issues LetsEncrypt certs automatically
+```
+
+If 80/443 are already in use on the host, override `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` and set `CADDY_PORT_SUFFIX=:8080` so the URLs the onboarding UI renders match.
+
+VS Code (`code-server`) and the web terminal still use Coder's path-based proxy (`http://localhost:7080/@<owner>/<workspace>/...`) — no subdomain needed since they handle path prefixes natively.
 
 ## ⏱️ "Ready" semantics
 
@@ -144,7 +165,7 @@ make test    # run the Playwright happy-path suite
 
 - Email delivery (we surface the temp Coder password on screen rather than emailing).
 - Multi-tenancy / orgs in Coder (single default org).
-- Wildcard subdomain URLs (we use path-based; HMR may be flaky for the Mercato app, but the splash and code-server work fine and the app loads).
+- TLS termination at caddy beyond out-of-the-box LetsEncrypt (no custom certs / mTLS).
 - Production hardening (TLS, secret management, OIDC).
 
 ## 📜 License

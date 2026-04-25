@@ -1,0 +1,62 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "Mercato Sandboxes" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e6]: Mercato
+          - generic [ref=e7]: Sandboxes
+        - navigation [ref=e8]:
+          - link "Log in" [ref=e9] [cursor=pointer]:
+            - /url: /login
+          - link "Sign up" [ref=e10] [cursor=pointer]:
+            - /url: /signup
+          - button "Toggle theme" [ref=e11] [cursor=pointer]:
+            - img
+            - generic [ref=e12]: Toggle theme
+    - main [ref=e13]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - heading "Create your account" [level=3] [ref=e18]
+          - paragraph [ref=e19]: Spin up isolated dev sandboxes in minutes.
+        - generic [ref=e20]:
+          - generic [ref=e21]:
+            - generic [ref=e22]:
+              - text: First name
+              - textbox "First name" [ref=e23]:
+                - /placeholder: Ada
+            - generic [ref=e24]:
+              - text: Last name
+              - textbox "Last name" [ref=e25]:
+                - /placeholder: Lovelace
+          - generic [ref=e26]:
+            - generic [ref=e27]: Company (optional)
+            - textbox "Company (optional)" [ref=e28]:
+              - /placeholder: Acme Inc.
+          - generic [ref=e29]:
+            - text: Email
+            - textbox "Email" [ref=e30]:
+              - /placeholder: you@example.com
+          - generic [ref=e31]:
+            - text: Password
+            - textbox "Password" [ref=e32]:
+              - /placeholder: ••••••••
+            - paragraph [ref=e33]: Min 8 characters.
+          - generic [ref=e34]:
+            - checkbox "I agree to the Terms of Service and Privacy Policy." [ref=e35] [cursor=pointer]
+            - checkbox
+            - generic [ref=e36]:
+              - text: I agree to the
+              - link "Terms of Service" [ref=e37] [cursor=pointer]:
+                - /url: /terms
+              - text: and
+              - link "Privacy Policy" [ref=e38] [cursor=pointer]:
+                - /url: /privacy
+              - text: .
+        - generic [ref=e39]:
+          - button "Create account" [disabled]
+          - paragraph [ref=e40]:
+            - text: Already have an account?
+            - link "Log in" [ref=e41] [cursor=pointer]:
+              - /url: /login
+  - alert [ref=e42]

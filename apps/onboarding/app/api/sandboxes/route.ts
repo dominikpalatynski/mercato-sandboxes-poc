@@ -4,6 +4,34 @@ import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { ensureCoderUser, createWorkspace } from '@/lib/coder';
 
+interface SandboxListRow {
+  id: string;
+  name: string;
+  status: string;
+  status_message: string | null;
+  coder_workspace_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function GET(req: Request): Promise<NextResponse> {
+  let session;
+  try {
+    session = await requireSessionFromRequest(req);
+  } catch (resp) {
+    if (resp instanceof NextResponse) return resp;
+    throw resp;
+  }
+  const { rows } = await query<SandboxListRow>(
+    `select id, name, status, status_message, coder_workspace_id, created_at, updated_at
+       from sandboxes
+      where user_id = $1
+      order by created_at desc`,
+    [session.sub],
+  );
+  return NextResponse.json({ sandboxes: rows });
+}
+
 const Body = z.object({
   name: z.string().regex(/^[a-z0-9-]{3,32}$/, {
     message: 'Name must be 3-32 chars, lowercase letters, digits and dashes only.',

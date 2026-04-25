@@ -12,11 +12,20 @@ name: mercato-sandboxes
 networks:
   control:
     driver: bridge
+  # Shared proxy network: caddy-docker-proxy lives here; the Coder template
+  # also attaches every workspace container to it (see coder/template/main.tf).
+  # `name:` is pinned so the Terraform `data "docker_network" "proxy"` lookup
+  # finds it regardless of compose's project-name prefix.
+  mercato-proxy:
+    name: mercato-proxy
+    driver: bridge
 
 volumes:
   postgres-coder-data:
   postgres-onboarding-data:
   coder-data:
+  caddy-data:
+  caddy-config:
 
 services:
   postgres-coder:
@@ -122,3 +131,29 @@ services:
       - ./.runtime:/run/secrets:ro
     networks:
       - control
+
+  # caddy-docker-proxy: dynamic reverse proxy that reads docker labels.
+  # Each workspace container (spawned by the Coder template) is attached to the
+  # `mercato-proxy` network and carries `caddy_0` / `caddy_1` labels — caddy
+  # picks them up automatically and publishes <workspace>.<SANDBOX_DOMAIN> on
+  # standard 80/443. ACME (LetsEncrypt) kicks in only when CADDY_ACME_EMAIL is
+  # set AND the domain isn't lvh.me/localhost (caddy auto-detects that).
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.10-alpine
+    container_name: mercato-caddy
+    restart: unless-stopped
+    environment:
+      # Tell caddy-docker-proxy to ignore unrelated containers — it only watches
+      # objects on the mercato-proxy network.
+      CADDY_INGRESS_NETWORKS: mercato-proxy
+      # ACME email (optional). Leave blank for local lvh.me / http-only setups.
+      CADDY_DOCKER_DEFAULT_EMAIL: ${CADDY_ACME_EMAIL:-}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - mercato-proxy

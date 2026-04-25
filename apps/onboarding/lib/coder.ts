@@ -58,6 +58,33 @@ export interface CoderWorkspaceStatus {
   ownerName: string;
   name: string;
   apps: WorkspaceApp[];
+  agentId: string | null;
+  latestBuildId: string | null;
+}
+
+export interface AgentMetadataItem {
+  key: string;
+  display_name: string;
+  value: string;
+  collected_at: string | null;
+  age_seconds: number | null;
+}
+
+export interface CoderWorkspaceMetadata {
+  cpu: AgentMetadataItem | null;
+  memory: AgentMetadataItem | null;
+  diskHome: AgentMetadataItem | null;
+  agentStatus: string | null;
+  lifecycleState: string | null;
+}
+
+export interface CoderLogLine {
+  id: number;
+  created_at: string;
+  log_level: string;
+  log_source?: string;
+  output: string;
+  stage?: string;
 }
 
 export interface CoderLinks {
@@ -182,18 +209,38 @@ interface RawWorkspaceApp {
   external?: boolean;
 }
 
+interface RawAgentMetadataItem {
+  result?: {
+    collected_at?: string;
+    age?: number;
+    value?: string;
+    error?: string;
+  };
+  description?: {
+    display_name?: string;
+    key?: string;
+    script?: string;
+    interval?: number;
+    timeout?: number;
+  };
+}
+
+interface RawAgent {
+  id: string;
+  status: string;
+  lifecycle_state: string;
+  apps?: RawWorkspaceApp[];
+}
+
 interface RawWorkspace {
   name: string;
   owner_name: string;
   latest_build: {
+    id: string;
     transition: string;
     job: { status: string };
     resources?: Array<{
-      agents?: Array<{
-        status: string;
-        lifecycle_state: string;
-        apps?: RawWorkspaceApp[];
-      }>;
+      agents?: RawAgent[];
     }>;
   };
 }
@@ -217,7 +264,61 @@ export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStat
     ownerName: ws.owner_name,
     name: ws.name,
     apps,
+    agentId: agent?.id ?? null,
+    latestBuildId: ws.latest_build.id ?? null,
   };
+}
+
+interface RawWorkspaceWithMetadata {
+  latest_build: {
+    transition: string;
+    job: { status: string };
+    resources?: Array<{
+      agents?: Array<RawAgent & { metadata?: RawAgentMetadataItem[] }>;
+    }>;
+  };
+}
+
+function pickMetadata(
+  metadata: RawAgentMetadataItem[] | undefined,
+  key: string,
+): AgentMetadataItem | null {
+  if (!metadata) return null;
+  const item = metadata.find((m) => m.description?.key === key);
+  if (!item) return null;
+  return {
+    key,
+    display_name: item.description?.display_name ?? key,
+    value: item.result?.value ?? '',
+    collected_at: item.result?.collected_at ?? null,
+    age_seconds: typeof item.result?.age === 'number' ? item.result.age : null,
+  };
+}
+
+export async function getWorkspaceMetadata(id: string): Promise<CoderWorkspaceMetadata> {
+  const ws = await coderFetch<RawWorkspaceWithMetadata>(`/api/v2/workspaces/${id}`);
+  const agents = (ws.latest_build.resources ?? []).flatMap((r) => r.agents ?? []);
+  const agent = agents[0];
+  const md = (agent as (RawAgent & { metadata?: RawAgentMetadataItem[] }) | undefined)?.metadata;
+  return {
+    cpu: pickMetadata(md, 'cpu'),
+    memory: pickMetadata(md, 'memory'),
+    diskHome: pickMetadata(md, 'disk_home'),
+    agentStatus: agent?.status ?? null,
+    lifecycleState: agent?.lifecycle_state ?? null,
+  };
+}
+
+export async function getBuildLogs(buildId: string, after = 0): Promise<CoderLogLine[]> {
+  return coderFetch<CoderLogLine[]>(`/api/v2/workspacebuilds/${buildId}/logs?after=${after}`);
+}
+
+export async function getAgentLogs(agentId: string, after = 0): Promise<CoderLogLine[]> {
+  return coderFetch<CoderLogLine[]>(`/api/v2/workspaceagents/${agentId}/logs?after=${after}`);
+}
+
+export async function cancelWorkspaceBuild(buildId: string): Promise<void> {
+  await coderFetch(`/api/v2/workspacebuilds/${buildId}/cancel`, { method: 'PATCH' });
 }
 
 /**

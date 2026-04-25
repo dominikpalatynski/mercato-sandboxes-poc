@@ -167,15 +167,33 @@ fi
 # 7. Create template version.
 VERSION_NAME="v-$(date +%s)"
 
-# Build user_variable_values from .env-sourced AI keys. Empty values are
-# OMITTED so terraform's `default = ""` still wins (and we don't accidentally
-# override a previously-set value with an empty string).
+# Build user_variable_values from .env. Empty values are OMITTED so
+# terraform's `default = ""` still wins (and we don't accidentally override a
+# previously-set value with an empty string).
+#
+# AI keys: forwarded into each workspace container as OPENAI_API_KEY /
+# ANTHROPIC_API_KEY for the preinstalled CLIs.
+#
+# Networking knobs (task #14): tell the template what subdomain root caddy
+# uses, what scheme to advertise, and any non-standard port suffix. Defaults
+# in main.tf assume local lvh.me on plain http:80 — overridable per env.
 USER_VARS="$(jq -n '[]')"
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   USER_VARS="$(echo "$USER_VARS" | jq --arg v "$OPENAI_API_KEY" '. + [{"name":"openai_api_key","value":$v}]')"
 fi
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   USER_VARS="$(echo "$USER_VARS" | jq --arg v "$ANTHROPIC_API_KEY" '. + [{"name":"anthropic_api_key","value":$v}]')"
+fi
+if [ -n "${SANDBOX_DOMAIN:-}" ]; then
+  USER_VARS="$(echo "$USER_VARS" | jq --arg v "$SANDBOX_DOMAIN" '. + [{"name":"sandbox_domain","value":$v}]')"
+fi
+if [ -n "${CADDY_SCHEME:-}" ]; then
+  USER_VARS="$(echo "$USER_VARS" | jq --arg v "$CADDY_SCHEME" '. + [{"name":"caddy_scheme","value":$v}]')"
+fi
+# Note: empty string is a valid value here (= "no port suffix, standard 80/443"),
+# so we forward it whenever the variable is *set* in the env, even if blank.
+if [ "${CADDY_PORT_SUFFIX+x}" = "x" ]; then
+  USER_VARS="$(echo "$USER_VARS" | jq --arg v "$CADDY_PORT_SUFFIX" '. + [{"name":"caddy_port_suffix","value":$v}]')"
 fi
 
 if [ -n "$EXISTING_TEMPLATE_ID" ]; then

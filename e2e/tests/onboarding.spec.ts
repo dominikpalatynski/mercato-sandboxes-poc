@@ -14,6 +14,13 @@ const PASSWORD = 'Sup3rSecret!';
 const ONBOARDING_BASE = process.env.BASE_URL ?? 'http://localhost:3000';
 const CODER_BASE = process.env.CODER_BASE_URL ?? 'http://localhost:7080';
 const CODER_TOKEN_PATH = path.resolve(__dirname, '../../.runtime/coder-admin-token');
+// Caddy subdomain reverse proxy (task #14): app + splash are now served from
+// <workspace>.<SANDBOX_DOMAIN> and <workspace>-splash.<SANDBOX_DOMAIN> on the
+// host's standard 80/443 (override with SANDBOX_DOMAIN / CADDY_SCHEME /
+// CADDY_PORT_SUFFIX to match a non-default deployment).
+const SANDBOX_DOMAIN = process.env.SANDBOX_DOMAIN ?? 'lvh.me';
+const CADDY_SCHEME = process.env.CADDY_SCHEME ?? 'http';
+const CADDY_PORT_SUFFIX = process.env.CADDY_PORT_SUFFIX ?? '';
 
 let email = '';
 let sandboxName = '';
@@ -85,22 +92,27 @@ test.describe.serial('mercato sandbox onboarding', () => {
     // eslint-disable-next-line no-console
     console.log(`[e2e] workspace ready after ~${elapsedSec}s`);
 
-    const expectedSubstrings = [
-      '/apps/code-server',
-      '/apps/splash',
-      '/apps/app',
-      '/terminal',
-    ] as const;
+    // After task #14, app + splash come from caddy subdomains; code-server +
+    // terminal stay on the Coder path-based proxy.
+    const coderPrefix = `${CODER_BASE}/@${coderUsername}/${sandboxName}/`;
+    const appPrefix = `${CADDY_SCHEME}://${sandboxName}.${SANDBOX_DOMAIN}${CADDY_PORT_SUFFIX}`;
+    const splashPrefix = `${CADDY_SCHEME}://${sandboxName}-splash.${SANDBOX_DOMAIN}${CADDY_PORT_SUFFIX}`;
 
-    for (const sub of expectedSubstrings) {
-      const link = page.locator(`a[href*="${sub}"]`).first();
-      await expect(link, `expected link containing ${sub}`).toBeVisible();
+    const expectedLinks: ReadonlyArray<{ selector: string; prefix: string }> = [
+      { selector: 'a[href*="/apps/code-server"]', prefix: coderPrefix },
+      { selector: 'a[href*="/terminal"]', prefix: coderPrefix },
+      { selector: `a[href^="${appPrefix}"]`, prefix: appPrefix },
+      { selector: `a[href^="${splashPrefix}"]`, prefix: splashPrefix },
+    ];
+
+    for (const { selector, prefix } of expectedLinks) {
+      const link = page.locator(selector).first();
+      await expect(link, `expected link with selector ${selector}`).toBeVisible();
       const href = await link.getAttribute('href');
-      expect(href, `href for ${sub}`).toBeTruthy();
-      const expectedPrefix = `${CODER_BASE}/@${coderUsername}/${sandboxName}/`;
+      expect(href, `href for ${selector}`).toBeTruthy();
       expect(
-        href!.startsWith(expectedPrefix),
-        `href ${href} should start with ${expectedPrefix}`,
+        href!.startsWith(prefix),
+        `href ${href} should start with ${prefix}`,
       ).toBeTruthy();
     }
   });

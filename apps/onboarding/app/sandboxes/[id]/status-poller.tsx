@@ -10,7 +10,6 @@ import {
   Info,
   Loader,
   LayoutDashboard,
-  Loader2,
   Terminal,
   type LucideIcon,
 } from 'lucide-react';
@@ -18,6 +17,8 @@ import {
 import StatusBadge from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import ProvisioningConsole from '@/components/provisioning-console';
+import WorkspaceStats from '@/components/workspace-stats';
 import { cn } from '@/lib/utils';
 
 export interface SandboxView {
@@ -164,6 +165,7 @@ export default function StatusPoller({ initial }: Props) {
       {/* Ready state */}
       {sandbox.status === 'ready' && (
         <>
+          <WorkspaceStats sandboxId={initial.id} enabled variant="wide" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {links.map((l) => {
               const Icon = l.icon;
@@ -224,56 +226,48 @@ export default function StatusPoller({ initial }: Props) {
         </>
       )}
 
-      {/* Failed state */}
+      {/* Failed state — keep the streaming console visible (logs explain WHY it failed) */}
       {sandbox.status === 'failed' && (
-        <Card className="border-destructive/40 bg-destructive/5">
-          <div className="flex flex-row items-center gap-2 p-6 pb-3">
-            <AlertCircle className="h-5 w-5 text-destructive" />
-            <h2 className="text-base font-semibold leading-none">
-              Provisioning failed
-            </h2>
-          </div>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-foreground">
-              {sandbox.status_message || 'Workspace provisioning failed.'}
-            </p>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={onDeleteAndRetry}
-              disabled={deleting}
-            >
-              {deleting ? 'Deleting…' : 'Delete and retry'}
-            </Button>
-          </CardContent>
-        </Card>
+        <>
+          <Card className="border-destructive/40 bg-destructive/5">
+            <div className="flex flex-row items-center gap-2 p-6 pb-3">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              <h2 className="text-base font-semibold leading-none">
+                Provisioning failed
+              </h2>
+            </div>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-foreground">
+                {sandbox.status_message || 'Workspace provisioning failed.'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Scroll the build / agent logs below to see what went wrong.
+              </p>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={onDeleteAndRetry}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete and retry'}
+              </Button>
+            </CardContent>
+          </Card>
+          <ProvisioningConsole
+            sandboxId={initial.id}
+            status={sandbox.status}
+            statusMessage={sandbox.status_message}
+          />
+        </>
       )}
 
-      {/* Building / pending state */}
+      {/* Building / pending state — full provisioning console */}
       {sandbox.status !== 'ready' && sandbox.status !== 'failed' && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <div className="space-y-1.5">
-              <h2 className="text-xl font-semibold">
-                Provisioning your sandbox
-              </h2>
-              {sandbox.status_message && (
-                <p className="text-sm text-muted-foreground">
-                  {sandbox.status_message}
-                </p>
-              )}
-            </div>
-            <div className="h-1 w-full max-w-xs overflow-hidden rounded-full bg-muted">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-gradient" />
-            </div>
-            <p className="max-w-md text-xs text-muted-foreground">
-              This usually takes 30-60 seconds. The Mercato app inside
-              continues building for another 3-7 minutes after that. The
-              page polls every 3 seconds and updates automatically.
-            </p>
-          </CardContent>
-        </Card>
+        <ProvisioningConsole
+          sandboxId={initial.id}
+          status={sandbox.status}
+          statusMessage={sandbox.status_message}
+        />
       )}
     </div>
   );
