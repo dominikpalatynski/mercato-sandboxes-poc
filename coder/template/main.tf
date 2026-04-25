@@ -137,6 +137,9 @@ resource "coder_agent" "main" {
       grep -q '^OM_DEV_AUTO_OPEN=' .env || echo "OM_DEV_AUTO_OPEN=0" >> .env
       grep -q '^OM_DEV_SPLASH_PORT=' .env || echo "OM_DEV_SPLASH_PORT=4000" >> .env
       yarn install
+      # Bootstrap the agentic AI tooling (Claude Code / Codex / opencode wiring)
+      # so the dev box is ready for prompt-driven coding from the first start.
+      yarn mercato agentic:init >/tmp/mercato-agentic-init.log 2>&1 || true
     fi
 
     # 3. always: launch dev (yarn setup is idempotent — runs migrate + initialize, then dev)

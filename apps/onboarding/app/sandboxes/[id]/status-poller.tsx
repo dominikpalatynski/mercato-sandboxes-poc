@@ -345,10 +345,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
                   </div>
                 </div>
               );
-              const href =
-                l.viaCoderLogin && l.url
-                  ? coderLoginHref(initial.id, l.url)
-                  : l.url ?? '#';
+              const href = l.url ?? '#';
               return disabled ? (
                 <div key={l.label} className={cardClass}>
                   {content}
