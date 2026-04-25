@@ -90,6 +90,12 @@ services:
       # Default admin-token cap is 168h (7d); we extend it for the POC onboarding workflow.
       CODER_MAX_TOKEN_LIFETIME: "8760h"
       CODER_MAX_ADMIN_TOKEN_LIFETIME: "8760h"
+      # Allow share=authenticated on path-based coder_apps (code-server / terminal).
+      # Without this, only the workspace owner can open path-based apps — which
+      # blocks anyone (including the onboarding-app session user) from reaching
+      # VS Code via /@user/ws/apps/code-server.
+      CODER_DANGEROUS_ALLOW_PATH_APP_SHARING: "true"
+      CODER_DANGEROUS_ALLOW_PATH_APP_SITE_OWNER_ACCESS: "true"
     ports:
       - "${CODER_HTTP_PORT:-7080}:7080"
     volumes:
@@ -97,6 +103,12 @@ services:
       - coder-data:/home/coder/.config
     networks:
       - control
+      - mercato-proxy
+    labels:
+      # Reach Coder admin (and path-based VS Code/terminal apps) via the
+      # base-domain family, so cookies stay coherent with sandbox.lvh.me.
+      caddy_0: http://coder.${SANDBOX_DOMAIN:-lvh.me}:80
+      caddy_0.reverse_proxy: "{{upstreams 7080}}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
