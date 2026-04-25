@@ -29,5 +29,24 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    /**
+     * `production` project — points at the live Hetzner deploy. Run with:
+     *
+     *   SANDBOX_DOMAIN=sandbox.openmercato.com \
+     *     npx playwright test --project=production
+     *
+     * The base URL is the onboarding subdomain caddy publishes
+     * (`https://app.<SANDBOX_DOMAIN>` per docker-compose.prod.yml). Assumes a
+     * wildcard cert is already issued; the test will fail loudly on a TLS
+     * error instead of silently skipping cert validation.
+     */
+    {
+      name: 'production',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: process.env.BASE_URL ?? `https://app.${process.env.SANDBOX_DOMAIN ?? 'sandbox.openmercato.com'}`,
+        ignoreHTTPSErrors: false,
+      },
+    },
   ],
 });

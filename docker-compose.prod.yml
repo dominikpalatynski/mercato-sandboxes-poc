@@ -1,0 +1,119 @@
+# Production override for the Mercato Sandboxes stack.
+#
+# Activate with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this changes vs. local dev:
+#   * caddy: replaces the stock lucaslorentz/caddy-docker-proxy image with our
+#     custom build (./caddy/Dockerfile) that includes the caddy-dns/cloudflare
+#     plugin so we can issue a single wildcard cert for *.${SANDBOX_DOMAIN}
+#     via DNS-01. Mounts /var/run/docker.sock RO so the proxy can read labels.
+#   * caddy global config (CADDY_DOCKER_CADDYFILE_PATH): we mount a Caddyfile
+#     snippet that pre-declares the wildcard tls block — caddy then reuses
+#     that single cert for every <workspace>.${SANDBOX_DOMAIN} virtual host
+#     emitted by docker labels. Without this, caddy would try HTTP-01 per
+#     subdomain (unreachable from the public internet without per-host DNS).
+#   * coder: pinned to a release tag (overridable via CODER_IMAGE_TAG) so we
+#     don't pick up untested upstream changes on a redeploy.
+#   * postgres-onboarding: NOT exposed on the host — only accessible inside
+#     the docker network. The onboarding app reaches it by service name.
+#   * onboarding: NODE_ENV=production already comes from the base file; here
+#     we add restart=always and stricter healthcheck.
+#
+# DATA-PRESERVATION CONTRACT
+# --------------------------
+# Every persistent dataset is a NAMED volume declared in docker-compose.yml:
+#   * postgres-coder-data         (Coder metadata)
+#   * postgres-onboarding-data    (onboarding users/sandboxes)
+#   * coder-data                  (Coder server state)
+#   * caddy-data                  (issued certs, ACME account keys)
+#   * caddy-config                (caddy generated config cache)
+# The deploy script (scripts/deploy-hetzner.sh) NEVER calls `docker compose
+# down -v`, `docker volume rm`, or `docker system prune --volumes` — see the
+# script header for the full assertion. Re-running the deploy script preserves
+# every workspace, every cert, and every onboarding user.
+
+name: mercato-sandboxes
+
+services:
+  caddy:
+    # Custom image with caddy-dns/cloudflare baked in for wildcard DNS-01.
+    # The base compose file's `image:` is intentionally overridden via `build:`
+    # so the image is reproducible from this repo.
+    image: mercato-caddy:${CADDY_IMAGE_TAG:-latest}
+    build:
+      context: ./caddy
+      args:
+        DNS_PROVIDER: ${CADDY_DNS_PROVIDER:-cloudflare}
+    environment:
+      # caddy-docker-proxy: only watch the mercato-proxy network (unchanged).
+      CADDY_INGRESS_NETWORKS: mercato-proxy
+      # Default ACME email — used by both the wildcard issuer and any per-host
+      # ACME fallbacks. Required in prod (caddy errors out otherwise).
+      CADDY_DOCKER_DEFAULT_EMAIL: ${CADDY_ACME_EMAIL:?CADDY_ACME_EMAIL must be set in .env.production}
+      # Cloudflare API token for DNS-01. Read from .env.production. caddy-dns
+      # picks it up via the {env.CLOUDFLARE_API_TOKEN} placeholder in the
+      # mounted Caddyfile snippet (see ./caddy/Caddyfile.prod).
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN must be set in .env.production}
+      # Tell caddy-docker-proxy to merge our static Caddyfile (wildcard TLS
+      # block) with the dynamic per-container snippets it generates.
+      CADDY_DOCKER_CADDYFILE_PATH: /etc/caddy/Caddyfile
+      # Force the production ACME endpoint. (Set to LE staging during smoke
+      # tests by overriding CADDY_ACME_CA in the env file.)
+      CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+    restart: always
+
+  coder:
+    image: ghcr.io/coder/coder:${CODER_IMAGE_TAG:-v2.21.3}
+    restart: always
+    environment:
+      # Production access URL — what users see in the browser. Must match the
+      # cert SAN (so we publish under the apex sandbox domain).
+      CODER_ACCESS_URL: ${CODER_ACCESS_URL:?CODER_ACCESS_URL required in prod}
+      # Disable wildcard subdomain apps (we use path-based for code-server
+      # and external = true for app/splash, which caddy publishes itself).
+      CODER_WILDCARD_ACCESS_URL: ""
+      CODER_TELEMETRY_ENABLE: "false"
+    # No host port mapping in prod: caddy reverse-proxies the Coder UI at
+    # https://coder.${SANDBOX_DOMAIN} via the mercato-proxy network. Keeping
+    # 7080 unpublished cuts off direct access bypassing TLS.
+    ports: !reset []
+    networks:
+      - control
+      - mercato-proxy
+    labels:
+      # Coder admin UI on its own subdomain, covered by the wildcard cert.
+      caddy_0: https://coder.${SANDBOX_DOMAIN}
+      caddy_0.reverse_proxy: "{{upstreams 7080}}"
+
+  onboarding:
+    restart: always
+    environment:
+      NODE_ENV: production
+      CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:?CODER_PUBLIC_URL required in prod}
+    # No host port mapping — onboarding is published by caddy on
+    # https://app.${SANDBOX_DOMAIN}.
+    ports: !reset []
+    networks:
+      - control
+      - mercato-proxy
+    labels:
+      caddy_0: https://app.${SANDBOX_DOMAIN}
+      caddy_0.reverse_proxy: "{{upstreams 3000}}"
+
+  postgres-onboarding:
+    # In prod the onboarding DB is NOT exposed on the host — only the
+    # onboarding container in the same docker network can reach it.
+    ports: !reset []
+    restart: always
+
+  postgres-coder:
+    restart: always

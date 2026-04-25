@@ -124,6 +124,27 @@ bash scripts/push-template.sh
 
 Workspaces created **before** the keys were set will not have them — recreate those workspaces from the onboarding UI.
 
+## 🚀 Deploying to production
+
+Production deploys go to a single Hetzner VPS under `*.sandbox.openmercato.com`
+with a wildcard Let's Encrypt cert (DNS-01 via Cloudflare). The deploy is
+**idempotent** and **safe to re-run** — every named docker volume (Coder DB,
+onboarding DB, issued certs, workspace homes, sidecar postgres data) is
+preserved across redeploys.
+
+```bash
+# On the VPS:
+git clone https://github.com/<org>/dokploy-sandboxes-poc.git /opt/mercato-sandboxes
+cd /opt/mercato-sandboxes
+cp .env.production.example .env.production
+$EDITOR .env.production         # CLOUDFLARE_API_TOKEN, JWT_SECRET, passwords
+./scripts/deploy-hetzner.sh
+```
+
+See **[SPEC-PROD.md](./SPEC-PROD.md)** for the canonical production spec —
+DNS prerequisites, the wildcard-TLS architecture, the data-preservation
+contract, and the operational runbook.
+
 ## 🛠️ Development
 
 ```bash

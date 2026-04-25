@@ -225,6 +225,25 @@ resource "docker_volume" "home" {
   }
 }
 
+# Persistent volume for the sidecar postgres data dir. Without this, every
+# `docker container restart` (e.g. workspace stop/start cycle, or a `docker
+# compose up -d` on the host that recreates the container) would lose all
+# Mercato app data — products, orders, tenants, the whole DB.
+#
+# Naming mirrors the home volume (`coder-<workspace_id>-pg-data`) so that
+# `docker volume ls` makes the relationship obvious to operators. The
+# `lifecycle.ignore_changes` block means terraform will NEVER destroy this
+# volume on a template upgrade — only an explicit `docker volume rm` (or
+# `coder workspace delete`, which Coder runs through its own cleanup) can
+# remove it.
+resource "docker_volume" "pg_data" {
+  name = "coder-${data.coder_workspace.me.id}-pg-data"
+
+  lifecycle {
+    ignore_changes = all
+  }
+}
+
 # Private network for the workspace ↔ sidecar postgres traffic.
 resource "docker_network" "workspace" {
   name = "coder-${data.coder_workspace.me.id}-net"
@@ -259,6 +278,14 @@ resource "docker_container" "postgres" {
   networks_advanced {
     name    = docker_network.workspace.name
     aliases = ["workspace-pg"]
+  }
+
+  # Persistent data dir — survives container recreate / template upgrade.
+  # See docker_volume.pg_data above for the lifecycle guarantee.
+  volumes {
+    container_path = "/var/lib/postgresql/data"
+    volume_name    = docker_volume.pg_data.name
+    read_only      = false
   }
 
   healthcheck {

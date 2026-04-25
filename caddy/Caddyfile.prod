@@ -1,0 +1,43 @@
+# Caddyfile snippet merged with the dynamic config emitted by
+# caddy-docker-proxy in production.
+#
+# Purpose: declare a single wildcard cert for *.${SANDBOX_DOMAIN} (and the
+# apex) using DNS-01 with Cloudflare. Every <workspace>.${SANDBOX_DOMAIN}
+# vhost generated from container labels then matches this cert automatically
+# and serves HTTPS on the first request — no per-subdomain ACME round-trip.
+#
+# SANDBOX_DOMAIN is interpolated at container start: caddy substitutes
+# {env.SANDBOX_DOMAIN} from the container's environment (set in
+# docker-compose.prod.yml via .env.production).
+#
+# Sources:
+#   * https://caddyserver.com/docs/automatic-https#wildcard-certificates
+#   * https://github.com/caddy-dns/cloudflare
+
+{
+	# Use the production Let's Encrypt CA by default. Override via
+	# CADDY_ACME_CA env (e.g. https://acme-staging-v02.api.letsencrypt.org/directory)
+	# during smoke tests to avoid burning the real LE rate limit.
+	acme_ca {$CADDY_ACME_CA}
+	email {$CADDY_DOCKER_DEFAULT_EMAIL}
+}
+
+# Pre-issue ONE wildcard cert that covers every workspace subdomain.
+# `*.${domain}` covers <workspace>.<domain> AND <workspace>-splash.<domain>
+# AND coder.<domain> AND app.<domain> — all single-label children of the apex.
+*.{$SANDBOX_DOMAIN}, {$SANDBOX_DOMAIN} {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		# Propagation timeout generous so first issuance from a cold start
+		# tolerates Cloudflare's ~30 s DNS propagation.
+		propagation_timeout 2m
+	}
+
+	# This block intentionally has no routes — caddy-docker-proxy injects
+	# per-container reverse_proxy directives via labels, and they will match
+	# their specific subdomain (e.g. `https://my-sandbox.sandbox.example.com`)
+	# while reusing the wildcard cert from this site block. If a request hits
+	# a hostname under the wildcard with NO matching workspace container,
+	# caddy returns the default 404 — which is the desired behavior.
+	respond "Mercato Sandboxes — no workspace at {host}" 404
+}
