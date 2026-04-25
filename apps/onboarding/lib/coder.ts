@@ -269,16 +269,6 @@ export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStat
   };
 }
 
-interface RawWorkspaceWithMetadata {
-  latest_build: {
-    transition: string;
-    job: { status: string };
-    resources?: Array<{
-      agents?: Array<RawAgent & { metadata?: RawAgentMetadataItem[] }>;
-    }>;
-  };
-}
-
 function pickMetadata(
   metadata: RawAgentMetadataItem[] | undefined,
   key: string,
@@ -295,17 +285,85 @@ function pickMetadata(
   };
 }
 
+/**
+ * Read the first SSE `event: data` payload from a Coder watch endpoint and
+ * abort. Coder's `/api/v2/workspaceagents/{id}/watch-metadata` is the ONLY
+ * endpoint that exposes live `coder_agent.main.metadata` results — the plain
+ * workspace + agent JSON endpoints omit the field entirely.
+ */
+async function readFirstSseEvent(path: string, timeoutMs = 4_000): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${CODER_URL}${path}`, {
+      headers: {
+        'Coder-Session-Token': adminToken(),
+        Accept: 'text/event-stream',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE events are separated by a blank line. Look for the first complete event.
+      const sep = buf.indexOf('\n\n');
+      if (sep !== -1) {
+        const event = buf.slice(0, sep);
+        controller.abort();
+        // Concatenate any `data:` lines (per SSE spec there can be multiple).
+        const data = event
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).replace(/^ /, ''))
+          .join('\n');
+        return data;
+      }
+    }
+    return null;
+  } catch {
+    // AbortError on the success path is expected; transient failures fall through to null.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getWorkspaceMetadata(id: string): Promise<CoderWorkspaceMetadata> {
-  const ws = await coderFetch<RawWorkspaceWithMetadata>(`/api/v2/workspaces/${id}`);
-  const agents = (ws.latest_build.resources ?? []).flatMap((r) => r.agents ?? []);
-  const agent = agents[0];
-  const md = (agent as (RawAgent & { metadata?: RawAgentMetadataItem[] }) | undefined)?.metadata;
+  // We need the agent id to hit /watch-metadata. Cheap: one workspace JSON call.
+  const status = await getWorkspaceStatus(id);
+  if (!status.agentId) {
+    return {
+      cpu: null,
+      memory: null,
+      diskHome: null,
+      agentStatus: status.agentStatus,
+      lifecycleState: status.lifecycleState,
+    };
+  }
+  const payload = await readFirstSseEvent(
+    `/api/v2/workspaceagents/${status.agentId}/watch-metadata`,
+  );
+  let md: RawAgentMetadataItem[] | undefined;
+  if (payload) {
+    try {
+      const parsed = JSON.parse(payload) as RawAgentMetadataItem[];
+      if (Array.isArray(parsed)) md = parsed;
+    } catch {
+      /* malformed event — fall through, return nulls */
+    }
+  }
   return {
     cpu: pickMetadata(md, 'cpu'),
     memory: pickMetadata(md, 'memory'),
     diskHome: pickMetadata(md, 'disk_home'),
-    agentStatus: agent?.status ?? null,
-    lifecycleState: agent?.lifecycle_state ?? null,
+    agentStatus: status.agentStatus,
+    lifecycleState: status.lifecycleState,
   };
 }
 

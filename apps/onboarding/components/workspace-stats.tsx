@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Cpu, HardDrive, MemoryStick } from 'lucide-react';
+import { Cpu, HardDrive, MemoryStick, RefreshCw } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -34,8 +34,13 @@ const DEFAULT_INTERVAL = 5_000;
 
 function parsePercent(value: string | undefined): number | null {
   if (!value) return null;
-  // `coder stat cpu` returns e.g. "12% 0.42 cores", `coder stat mem` -> "1.2/16 GB",
-  // `coder stat disk` -> "12/64 GB". Try percent first, then ratio.
+  // Coder stat outputs we see in practice:
+  //   cpu  -> "0.008 cores" (no percent — leave bar empty)
+  //   mem  -> "0.171/16 GiB (1%)" or "8.89/16 GiB (56%)"
+  //   disk -> "30.2/315 GiB (10%)"
+  // Prefer an explicit "(NN%)" if present, then a leading "NN%", then ratio.
+  const pctParen = value.match(/\((\d+(?:\.\d+)?)\s*%\)/);
+  if (pctParen) return Math.min(100, Math.max(0, Number(pctParen[1])));
   const pct = value.match(/(\d+(?:\.\d+)?)\s*%/);
   if (pct) return Math.min(100, Math.max(0, Number(pct[1])));
   const ratio = value.match(/^\s*([\d.]+)\s*\/\s*([\d.]+)/);
@@ -47,10 +52,14 @@ function parsePercent(value: string | undefined): number | null {
   return null;
 }
 
-function shortValue(value: string | undefined): string {
-  if (!value) return '—';
-  // First whitespace-trimmed chunk is the headline (e.g. "12%", "1.2/16").
-  return value.trim().split(/\s+/).slice(0, 2).join(' ');
+/**
+ * Coder's `coder stat …` output is already user-friendly
+ * ("0.008 cores", "30.2/315 GiB (10%)", "0.171/16 GiB (1%)").
+ * Show it verbatim when populated; "—" when empty / missing.
+ */
+function displayValue(value: string | undefined): string {
+  if (!value || !value.trim()) return '—';
+  return value.trim();
 }
 
 interface StatRowProps {
@@ -162,21 +171,21 @@ export default function WorkspaceStats({
         <StatRow
           icon={Cpu}
           label="CPU"
-          value={shortValue(cpu?.value)}
+          value={displayValue(cpu?.value)}
           pct={cpuPct}
           variant="compact"
         />
         <StatRow
           icon={MemoryStick}
           label="RAM"
-          value={shortValue(mem?.value)}
+          value={displayValue(mem?.value)}
           pct={memPct}
           variant="compact"
         />
         <StatRow
           icon={HardDrive}
           label="Disk"
-          value={shortValue(disk?.value)}
+          value={displayValue(disk?.value)}
           pct={diskPct}
           variant="compact"
         />
@@ -187,32 +196,43 @@ export default function WorkspaceStats({
   return (
     <div
       className={cn(
-        'grid grid-cols-1 gap-4 rounded-lg border border-border bg-card p-5 sm:grid-cols-3',
+        'rounded-lg border border-border bg-card p-5',
         className,
       )}
       aria-label="Live workspace stats"
     >
+      <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <RefreshCw
+          className={cn('h-3.5 w-3.5', loaded ? 'text-emerald-500' : 'animate-spin')}
+        />
+        <span>Resources</span>
+        <span className="ml-auto text-[11px] normal-case text-muted-foreground/70">
+          live
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <StatRow
         icon={Cpu}
         label={cpu?.display_name || 'CPU usage'}
-        value={shortValue(cpu?.value)}
+        value={displayValue(cpu?.value)}
         pct={cpuPct}
         variant="wide"
       />
       <StatRow
         icon={MemoryStick}
         label={mem?.display_name || 'RAM usage'}
-        value={shortValue(mem?.value)}
+        value={displayValue(mem?.value)}
         pct={memPct}
         variant="wide"
       />
       <StatRow
         icon={HardDrive}
         label={disk?.display_name || 'Home disk'}
-        value={shortValue(disk?.value)}
+        value={displayValue(disk?.value)}
         pct={diskPct}
         variant="wide"
       />
+      </div>
     </div>
   );
 }
