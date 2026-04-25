@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { requireSession } from '@/lib/auth';
 import { query } from '@/lib/db';
+import StatusBadge from '@/components/status-badge';
+import { formatRelative } from '@/lib/relative-time';
 
 interface SandboxRow {
   id: string;
@@ -11,20 +13,6 @@ interface SandboxRow {
 }
 
 export const dynamic = 'force-dynamic';
-
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'ready':
-      return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-    case 'failed':
-      return 'bg-red-500/20 text-red-300 border-red-500/40';
-    case 'building':
-    case 'pending':
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-    default:
-      return 'bg-white/10 text-gray-300 border-white/20';
-  }
-}
 
 export default async function DashboardPage() {
   const session = await requireSession();
@@ -52,25 +40,33 @@ export default async function DashboardPage() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded border border-dashed border-white/15 p-8 text-center text-gray-400">
-          You have no sandboxes yet — create one to get started.
+        <div className="mx-auto max-w-md rounded-lg border border-slate-700/50 bg-slate-900/40 p-8 text-center">
+          <h2 className="text-lg font-semibold text-gray-100">No sandboxes yet</h2>
+          <p className="mt-1 text-sm text-gray-400">
+            Spin up a fresh Open Mercato development environment in a couple of minutes.
+          </p>
+          <Link
+            href="/sandboxes/new"
+            className="mt-4 inline-block rounded bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400"
+          >
+            Create your first sandbox
+          </Link>
         </div>
       ) : (
         <ul className="space-y-3">
           {rows.map((s) => (
             <li
               key={s.id}
-              className="flex items-center justify-between rounded border border-white/10 bg-white/5 p-4"
+              className="flex items-center justify-between rounded border border-slate-700/50 bg-slate-900/40 p-4 transition hover:bg-slate-800/50"
             >
               <div className="space-y-1">
                 <Link href={`/sandboxes/${s.id}`} className="font-medium text-gray-100 hover:underline">
                   {s.name}
                 </Link>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span className={`rounded border px-2 py-0.5 uppercase tracking-wide ${statusBadgeClass(s.status)}`}>
-                    {s.status}
-                  </span>
-                  {s.status_message ? <span>{s.status_message}</span> : null}
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                  <StatusBadge status={s.status} />
+                  <span>created {formatRelative(s.created_at)}</span>
+                  {s.status_message ? <span>· {s.status_message}</span> : null}
                 </div>
               </div>
               <Link href={`/sandboxes/${s.id}`} className="text-sm text-indigo-300 hover:underline">

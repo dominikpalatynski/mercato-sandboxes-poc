@@ -10,6 +10,10 @@ RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 FROM node:24-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Pass through CODER_PUBLIC_URL so next.config.js inlines it as
+# NEXT_PUBLIC_CODER_URL into the client bundle.
+ARG CODER_PUBLIC_URL=http://localhost:7080
+ENV CODER_PUBLIC_URL=$CODER_PUBLIC_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

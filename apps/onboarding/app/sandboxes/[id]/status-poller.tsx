@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import StatusBadge from '@/components/status-badge';
 
 export interface SandboxView {
   id: string;
@@ -12,6 +13,9 @@ export interface SandboxView {
   terminal_url: string | null;
   app_url: string | null;
   splash_url: string | null;
+  // Set on the server when rendering the page; safe to expose (already in DB).
+  coder_owner_name?: string | null;
+  coder_workspace_name?: string | null;
 }
 
 interface Props {
@@ -22,31 +26,30 @@ interface Props {
 
 const POLL_INTERVAL_MS = 3_000;
 
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'ready':
-      return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-    case 'failed':
-      return 'bg-red-500/20 text-red-300 border-red-500/40';
-    case 'building':
-    case 'pending':
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-    default:
-      return 'bg-white/10 text-gray-300 border-white/20';
-  }
+// next.config.js inlines this at build time; default keeps local dev sane.
+const CODER_PUBLIC_URL =
+  (process.env.NEXT_PUBLIC_CODER_URL || 'http://localhost:7080').replace(/\/$/, '');
+
+interface LinkSpec {
+  label: string;
+  subtitle: string;
+  url: string | null;
 }
 
 export default function StatusPoller({ initial, coderEmail, coderTempPassword }: Props) {
   const router = useRouter();
   const [sandbox, setSandbox] = useState<SandboxView>(initial);
   const [credsDismissed, setCredsDismissed] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
   const [deleting, setDeleting] = useState(false);
   const stoppedRef = useRef(false);
 
-  // Local-storage flag so we don't keep nagging users about creds.
+  // sessionStorage (NOT localStorage): the panel reappears on a fresh page
+  // load so users can re-grab the temp password if they need it again.
   useEffect(() => {
     try {
-      const flag = window.localStorage.getItem(`sandbox-creds-dismissed:${initial.id}`);
+      const flag = window.sessionStorage.getItem(`sandbox-creds-dismissed:${initial.id}`);
       if (flag === '1') setCredsDismissed(true);
     } catch {
       /* ignore */
@@ -62,7 +65,13 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
         const res = await fetch(`/api/sandboxes/${initial.id}/status`, { cache: 'no-store' });
         if (res.ok) {
           const data = (await res.json()) as SandboxView;
-          setSandbox(data);
+          // The status API doesn't echo coder_owner_name / coder_workspace_name —
+          // preserve those from the initial server-rendered props.
+          setSandbox((prev) => ({
+            ...data,
+            coder_owner_name: prev.coder_owner_name ?? data.coder_owner_name ?? null,
+            coder_workspace_name: prev.coder_workspace_name ?? data.coder_workspace_name ?? null,
+          }));
           if (data.status === 'ready' || data.status === 'failed') {
             stoppedRef.current = true;
             return;
@@ -85,12 +94,23 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
 
   const dismissCreds = useCallback(() => {
     try {
-      window.localStorage.setItem(`sandbox-creds-dismissed:${initial.id}`, '1');
+      window.sessionStorage.setItem(`sandbox-creds-dismissed:${initial.id}`, '1');
     } catch {
       /* ignore */
     }
     setCredsDismissed(true);
   }, [initial.id]);
+
+  const onCopy = useCallback(async () => {
+    if (!coderTempPassword) return;
+    try {
+      await navigator.clipboard?.writeText(coderTempPassword);
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 1_500);
+    } catch {
+      /* ignore */
+    }
+  }, [coderTempPassword]);
 
   const onDeleteAndRetry = useCallback(async () => {
     setDeleting(true);
@@ -101,19 +121,23 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
     }
   }, [initial.id, router]);
 
-  const links: Array<{ label: string; url: string | null }> = [
-    { label: 'Open in VS Code', url: sandbox.vscode_url },
-    { label: 'Open Terminal', url: sandbox.terminal_url },
-    { label: 'Open App (port 3000)', url: sandbox.app_url },
-    { label: 'Open Splash (port 4000)', url: sandbox.splash_url },
+  const dashboardUrl = useMemo(() => {
+    if (!sandbox.coder_owner_name || !sandbox.coder_workspace_name) return null;
+    return `${CODER_PUBLIC_URL}/@${sandbox.coder_owner_name}/${sandbox.coder_workspace_name}`;
+  }, [sandbox.coder_owner_name, sandbox.coder_workspace_name]);
+
+  const links: LinkSpec[] = [
+    { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url },
+    { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url },
+    { label: 'Open Mercato App', subtitle: 'Direct port (3000)', url: sandbox.app_url },
+    { label: 'Open Splash', subtitle: 'Build progress (4000)', url: sandbox.splash_url },
+    { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl },
   ];
 
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <span className={`rounded border px-2 py-0.5 text-xs uppercase tracking-wide ${statusBadgeClass(sandbox.status)}`}>
-          {sandbox.status}
-        </span>
+        <StatusBadge status={sandbox.status} />
         {sandbox.status === 'building' && (
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-transparent" />
         )}
@@ -124,7 +148,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
 
       {sandbox.status === 'ready' && (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {links.map((l) => (
               <a
                 key={l.label}
@@ -132,50 +156,67 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
                 target="_blank"
                 rel="noopener"
                 aria-disabled={!l.url}
-                className={`flex items-center justify-center rounded-lg border px-4 py-4 text-center font-medium transition ${
+                className={`flex min-h-14 flex-col items-start justify-center rounded-lg border p-4 text-left transition ${
                   l.url
-                    ? 'border-indigo-400/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20'
-                    : 'cursor-not-allowed border-white/10 bg-white/5 text-gray-500'
+                    ? 'border-slate-700/50 bg-slate-900/40 hover:bg-slate-800/50'
+                    : 'cursor-not-allowed border-slate-800 bg-slate-900/20 opacity-60'
                 }`}
               >
-                {l.label}
+                <span
+                  className={`text-base font-medium ${l.url ? 'text-gray-100' : 'text-gray-500'}`}
+                >
+                  {l.label}
+                </span>
+                <span className="mt-0.5 text-xs text-gray-400">{l.subtitle}</span>
               </a>
             ))}
           </div>
 
+          <p className="text-xs text-gray-400">
+            VS Code is ready immediately. The Mercato app on port 3000 takes 3-7 minutes to finish
+            building on first start - watch the splash for progress.
+          </p>
+
           {!credsDismissed && coderTempPassword && (
-            <div className="rounded border border-white/15 bg-white/5 p-4">
+            <div className="rounded-lg border border-yellow-700/30 bg-yellow-950/20 p-4">
               <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-200">Coder credentials</h2>
+                <h2 className="text-sm font-semibold text-yellow-100">Coder credentials</h2>
                 <button
                   type="button"
                   onClick={dismissCreds}
-                  className="text-xs text-gray-400 hover:text-white"
+                  className="text-xs text-yellow-200/80 hover:text-white"
                 >
                   Dismiss
                 </button>
               </div>
-              <p className="mb-3 text-xs text-gray-400">
+              <p className="mb-3 text-xs text-yellow-100/70">
                 If Coder asks you to log in when opening the workspace, use these credentials. They
                 are shown once — write them down or copy now.
               </p>
               <dl className="space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-gray-400">Email</dt>
-                  <dd className="font-mono text-gray-100">{coderEmail}</dd>
+                  <dt className="text-yellow-100/70">Email</dt>
+                  <dd className="font-mono text-yellow-50">{coderEmail}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-gray-400">Temp password</dt>
+                  <dt className="text-yellow-100/70">Temp password</dt>
                   <dd className="flex items-center gap-2">
-                    <code className="rounded bg-black/40 px-2 py-0.5 font-mono text-gray-100">
-                      {coderTempPassword}
+                    <code className="rounded bg-black/40 px-2 py-0.5 font-mono text-yellow-50">
+                      {showPassword ? coderTempPassword : '•'.repeat(coderTempPassword.length)}
                     </code>
                     <button
                       type="button"
-                      onClick={() => navigator.clipboard?.writeText(coderTempPassword)}
-                      className="rounded border border-white/15 px-2 py-0.5 text-xs text-gray-300 hover:bg-white/10"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="rounded border border-yellow-700/40 px-2 py-0.5 text-xs text-yellow-100 hover:bg-yellow-900/40"
                     >
-                      Copy
+                      {showPassword ? 'hide' : 'show'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCopy}
+                      className="rounded border border-yellow-700/40 px-2 py-0.5 text-xs text-yellow-100 hover:bg-yellow-900/40"
+                    >
+                      {copyState === 'copied' ? 'Copied!' : 'Copy'}
                     </button>
                   </dd>
                 </div>

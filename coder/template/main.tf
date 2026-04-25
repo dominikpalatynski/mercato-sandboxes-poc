@@ -16,6 +16,10 @@ terraform {
       source  = "kreuzwerker/docker"
       version = "~> 3.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -30,6 +34,31 @@ provider "docker" {}
 data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
+
+###############################################################################
+# Random host ports for direct (host-mapped) port forwarding of the Mercato
+# app and splash screens. We expose these on the host loopback so Next.js'
+# absolute asset URLs (`/_next/static/...`) resolve without a path prefix —
+# Coder's path-based proxy at `/@user/ws/apps/app/` rewrites the HTML but not
+# the runtime asset URLs the app emits. `keepers` ties the port to the
+# workspace id so the same workspace gets a stable port across rebuilds.
+###############################################################################
+
+resource "random_integer" "app_port" {
+  min = 30000
+  max = 39000
+  keepers = {
+    workspace_id = data.coder_workspace.me.id
+  }
+}
+
+resource "random_integer" "splash_port" {
+  min = 30000
+  max = 39000
+  keepers = {
+    workspace_id = data.coder_workspace.me.id
+  }
+}
 
 ###############################################################################
 # Agent — installed in the workspace container; the init script gets injected
@@ -120,28 +149,24 @@ resource "coder_app" "splash" {
   agent_id     = coder_agent.main.id
   slug         = "splash"
   display_name = "Mercato Splash"
-  url          = "http://localhost:4000"
-  icon         = "/icon/widgets.svg"
-  subdomain    = false
-  share        = "authenticated"
-  open_in      = "tab"
+  # external=true means Coder will not proxy through /@user/ws/apps/splash —
+  # the user's browser hits the host port directly. This avoids the Next.js
+  # absolute-URL asset issue. Coder still shows the app on the dashboard.
+  # Note: `share` is incompatible with `external`; the URL is just a link.
+  external = true
+  url      = "http://localhost:${random_integer.splash_port.result}"
+  icon     = "/icon/widgets.svg"
+  open_in  = "tab"
 }
 
 resource "coder_app" "app" {
   agent_id     = coder_agent.main.id
   slug         = "app"
   display_name = "Mercato App"
-  url          = "http://localhost:3000"
+  external     = true
+  url          = "http://localhost:${random_integer.app_port.result}"
   icon         = "/icon/widgets.svg"
-  subdomain    = false
-  share        = "authenticated"
   open_in      = "tab"
-
-  healthcheck {
-    url       = "http://localhost:3000/"
-    interval  = 10
-    threshold = 30
-  }
 }
 
 ###############################################################################
@@ -225,6 +250,20 @@ resource "docker_container" "workspace" {
   networks_advanced {
     name    = docker_network.workspace.name
     aliases = ["workspace"]
+  }
+
+  # Direct host-port forwarding for the Mercato app + splash. We rely on the
+  # default bind (0.0.0.0). Code-server (13337) intentionally stays internal —
+  # it handles path prefixes natively, so the Coder proxy works fine for it.
+  ports {
+    internal = 3000
+    external = random_integer.app_port.result
+    protocol = "tcp"
+  }
+  ports {
+    internal = 4000
+    external = random_integer.splash_port.result
+    protocol = "tcp"
   }
 
   host {

@@ -22,6 +22,7 @@ interface SandboxRow {
 interface UserCreds {
   email: string;
   coder_temp_password: string | null;
+  coder_username: string | null;
 }
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +46,7 @@ export default async function SandboxDetailPage({
   if (!sandbox) notFound();
 
   const userResult = await query<UserCreds>(
-    'select email, coder_temp_password from users where id = $1',
+    'select email, coder_temp_password, coder_username from users where id = $1',
     [session.sub],
   );
   const user = userResult.rows[0];
@@ -59,6 +60,8 @@ export default async function SandboxDetailPage({
     terminal_url: sandbox.terminal_url,
     app_url: sandbox.app_url,
     splash_url: sandbox.splash_url,
+    coder_owner_name: user?.coder_username ?? null,
+    coder_workspace_name: sandbox.name,
   };
 
   return (

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
-import { buildLinks, coderPublicUrl, getWorkspaceStatus } from '@/lib/coder';
+import { buildLinks, coderPublicUrl, getWorkspaceStatus, resolveAppUrl } from '@/lib/coder';
 
 interface SandboxRow {
   id: string;
@@ -84,15 +84,25 @@ export async function GET(
       cs.lifecycleState === 'ready'
         ? 'Workspace ready'
         : `Workspace usable (lifecycle: ${cs.lifecycleState})`;
+    // Path-based fallbacks (used when apps[] hasn't fully populated yet).
     const links = buildLinks({
       coderPublicUrl,
       ownerName: cs.ownerName,
       name: cs.name,
     });
-    newVscode = links.vscode;
+    // Prefer the resolved URL from the apps[] list (handles external apps with
+    // direct host port URLs); fall back to the path-based link.
+    newVscode =
+      resolveAppUrl({ apps: cs.apps, slug: 'code-server', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
+      links.vscode;
+    newApp =
+      resolveAppUrl({ apps: cs.apps, slug: 'app', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
+      links.app;
+    newSplash =
+      resolveAppUrl({ apps: cs.apps, slug: 'splash', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
+      links.splash;
+    // Terminal is always path-based (Coder's web terminal, not a coder_app).
     newTerminal = links.terminal;
-    newApp = links.app;
-    newSplash = links.splash;
   } else {
     newStatus = 'building';
     newMessage = `job=${cs.jobStatus}${cs.lifecycleState ? `, lifecycle=${cs.lifecycleState}` : ''}`;

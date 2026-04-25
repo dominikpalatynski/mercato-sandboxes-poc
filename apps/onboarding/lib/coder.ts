@@ -43,6 +43,13 @@ export interface CoderWorkspaceRef {
   id: string;
 }
 
+export interface WorkspaceApp {
+  slug: string;
+  display_name: string;
+  url: string;
+  external: boolean;
+}
+
 export interface CoderWorkspaceStatus {
   jobStatus: string;            // pending|running|succeeded|failed|canceled
   transition: string;           // start|stop|delete
@@ -50,6 +57,7 @@ export interface CoderWorkspaceStatus {
   lifecycleState: string | null;
   ownerName: string;
   name: string;
+  apps: WorkspaceApp[];
 }
 
 export interface CoderLinks {
@@ -167,6 +175,13 @@ export async function createWorkspace(coderUserId: string, name: string): Promis
   return { id: created.id };
 }
 
+interface RawWorkspaceApp {
+  slug: string;
+  display_name: string;
+  url?: string;
+  external?: boolean;
+}
+
 interface RawWorkspace {
   name: string;
   owner_name: string;
@@ -174,7 +189,11 @@ interface RawWorkspace {
     transition: string;
     job: { status: string };
     resources?: Array<{
-      agents?: Array<{ status: string; lifecycle_state: string }>;
+      agents?: Array<{
+        status: string;
+        lifecycle_state: string;
+        apps?: RawWorkspaceApp[];
+      }>;
     }>;
   };
 }
@@ -183,6 +202,13 @@ export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStat
   const ws = await coderFetch<RawWorkspace>(`/api/v2/workspaces/${id}`);
   const agents = (ws.latest_build.resources ?? []).flatMap((r) => r.agents ?? []);
   const agent = agents[0];
+  const rawApps = (agents.flatMap((a) => a.apps ?? []) as RawWorkspaceApp[]) || [];
+  const apps: WorkspaceApp[] = rawApps.map((a) => ({
+    slug: a.slug,
+    display_name: a.display_name,
+    url: a.url ?? '',
+    external: a.external === true,
+  }));
   return {
     jobStatus: ws.latest_build.job.status,
     transition: ws.latest_build.transition,
@@ -190,7 +216,28 @@ export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStat
     lifecycleState: agent?.lifecycle_state ?? null,
     ownerName: ws.owner_name,
     name: ws.name,
+    apps,
   };
+}
+
+/**
+ * Resolve the user-facing URL for a given app slug from a workspace's apps list.
+ * - external apps: use the upstream `url` directly (e.g. http://localhost:30123).
+ * - non-external apps: build the path-based proxy URL via Coder.
+ * Returns null if the slug is missing entirely.
+ */
+export function resolveAppUrl(args: {
+  apps: WorkspaceApp[];
+  slug: string;
+  coderPublicUrl: string;
+  ownerName: string;
+  name: string;
+}): string | null {
+  const app = args.apps.find((a) => a.slug === args.slug);
+  if (!app) return null;
+  if (app.external && app.url) return app.url;
+  const base = `${args.coderPublicUrl.replace(/\/$/, '')}/@${args.ownerName}/${args.name}`;
+  return `${base}/apps/${args.slug}`;
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {

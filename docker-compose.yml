@@ -97,7 +97,10 @@ services:
       retries: 30
 
   onboarding:
-    build: ./apps/onboarding
+    build:
+      context: ./apps/onboarding
+      args:
+        CODER_PUBLIC_URL: ${CODER_PUBLIC_URL:-http://localhost:7080}
     container_name: onboarding
     restart: unless-stopped
     depends_on:
