@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   AppWindow,
+  ChevronRight,
   Code2,
   Copy,
   Eye,
@@ -20,6 +21,11 @@ import {
 import StatusBadge from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import ProvisioningConsole from '@/components/provisioning-console';
 import WorkspaceStats from '@/components/workspace-stats';
 import { cn } from '@/lib/utils';
@@ -55,6 +61,16 @@ interface LinkSpec {
   subtitle: string;
   url: string | null;
   icon: LucideIcon;
+  /**
+   * When true, the link is wrapped through `/api/coder-login?next=…` so the
+   * browser is auto-logged-in to Coder via a `coder_session_token` cookie
+   * scoped to the parent .sandbox.lvh.me domain.
+   */
+  viaCoderLogin?: boolean;
+}
+
+function coderLoginHref(sandboxId: string, target: string): string {
+  return `/api/coder-login?sandbox_id=${encodeURIComponent(sandboxId)}&next=${encodeURIComponent(target)}`;
 }
 
 export default function StatusPoller({ initial, coderEmail, coderTempPassword }: Props) {
@@ -63,19 +79,39 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
   const [copyState, setCopyState] = useState<'idle' | 'id' | 'email' | 'password'>('idle');
   const [deleting, setDeleting] = useState(false);
   const [credsDismissed, setCredsDismissed] = useState<boolean>(false);
+  const [credsOpen, setCredsOpen] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const stoppedRef = useRef(false);
 
   // sessionStorage (NOT localStorage): the panel reappears on a fresh page
   // load so users can re-grab the temp password if they need it again.
+  // We also persist the open/closed preference so polling-driven re-renders
+  // don't snap the panel back to its default folded state.
   useEffect(() => {
     try {
       const flag = window.sessionStorage.getItem(`sandbox-creds-dismissed:${initial.id}`);
       if (flag === '1') setCredsDismissed(true);
+      const openFlag = window.sessionStorage.getItem(`sandbox-creds-open:${initial.id}`);
+      if (openFlag === '1') setCredsOpen(true);
     } catch {
       /* ignore */
     }
   }, [initial.id]);
+
+  const onCredsOpenChange = useCallback(
+    (open: boolean) => {
+      setCredsOpen(open);
+      try {
+        window.sessionStorage.setItem(
+          `sandbox-creds-open:${initial.id}`,
+          open ? '1' : '0',
+        );
+      } catch {
+        /* ignore */
+      }
+    },
+    [initial.id],
+  );
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -150,11 +186,11 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
   }, [sandbox.coder_owner_name, sandbox.coder_workspace_name]);
 
   const links: LinkSpec[] = [
-    { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url, icon: Code2 },
-    { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url, icon: Terminal },
+    { label: 'Open in VS Code', subtitle: 'Browser-based VS Code', url: sandbox.vscode_url, icon: Code2, viaCoderLogin: true },
+    { label: 'Open Terminal', subtitle: 'Web terminal session', url: sandbox.terminal_url, icon: Terminal, viaCoderLogin: true },
     { label: 'Open Mercato App', subtitle: 'Direct port (3000)', url: sandbox.app_url, icon: AppWindow },
     { label: 'Open Splash', subtitle: 'Build progress (4000)', url: sandbox.splash_url, icon: Loader },
-    { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl, icon: LayoutDashboard },
+    { label: 'Open Coder dashboard', subtitle: 'Workspace overview', url: dashboardUrl, icon: LayoutDashboard, viaCoderLogin: true },
   ];
 
   const truncatedId = `${initial.id.slice(0, 8)}…${initial.id.slice(-4)}`;
@@ -188,79 +224,95 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
       {/* Ready state */}
       {sandbox.status === 'ready' && (
         <>
-          {/* Coder credentials — only on first visit per session */}
+          {/* Coder credentials — folded by default, fallback for when the
+              automatic Coder cookie hand-off is unavailable. */}
           {!credsDismissed && coderTempPassword && (
-            <Card className="border-primary/30 bg-primary/5 dark:bg-primary/10">
-              <div className="flex flex-row items-center justify-between gap-2 p-6 pb-3">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="h-5 w-5 text-primary" />
-                  <h2 className="text-base font-semibold leading-none">
-                    Coder credentials
-                  </h2>
+            <Collapsible
+              open={credsOpen}
+              onOpenChange={onCredsOpenChange}
+              asChild
+            >
+              <Card className="border-primary/30 bg-primary/5 dark:bg-primary/10">
+                <div className="flex flex-row items-center justify-between gap-2 p-3">
+                  <CollapsibleTrigger
+                    className="group flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={credsOpen ? 'Hide Coder credentials' : 'Show Coder credentials'}
+                  >
+                    <ChevronRight className="h-4 w-4 text-primary transition-transform group-data-[state=open]:rotate-90" />
+                    <KeyRound className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold leading-none">
+                      Coder credentials
+                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      (fallback if auto sign-in fails)
+                    </span>
+                  </CollapsibleTrigger>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={dismissCreds}
+                  >
+                    Dismiss
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={dismissCreds}
-                >
-                  Dismiss
-                </Button>
-              </div>
-              <CardContent className="space-y-3">
-                <dl className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <dt className="text-muted-foreground">Email</dt>
-                    <dd className="flex items-center gap-2">
-                      <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
-                        {coderEmail}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(coderEmail, 'email')}
-                        className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
-                        aria-label="Copy email"
-                      >
-                        <Copy className="h-3 w-3" />
-                        {copyState === 'email' ? 'Copied!' : 'Copy'}
-                      </button>
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <dt className="text-muted-foreground">Temp password</dt>
-                    <dd className="flex items-center gap-2">
-                      <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
-                        {showPassword ? coderTempPassword : '•'.repeat(Math.min(coderTempPassword.length, 12))}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((s) => !s)}
-                        className="inline-flex h-7 items-center justify-center rounded-sm border border-border px-2 hover:bg-accent hover:text-accent-foreground"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(coderTempPassword, 'password')}
-                        className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
-                        aria-label="Copy password"
-                      >
-                        <Copy className="h-3 w-3" />
-                        {copyState === 'password' ? 'Copied!' : 'Copy'}
-                      </button>
-                    </dd>
-                  </div>
-                </dl>
-                <p className="text-xs text-muted-foreground">
-                  Use these if Coder asks you to log in. The password is shown only this once.
-                </p>
-              </CardContent>
-            </Card>
+                <CollapsibleContent>
+                  <CardContent className="space-y-3 pt-0">
+                    <dl className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-muted-foreground">Email</dt>
+                        <dd className="flex items-center gap-2">
+                          <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
+                            {coderEmail}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(coderEmail, 'email')}
+                            className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+                            aria-label="Copy email"
+                          >
+                            <Copy className="h-3 w-3" />
+                            {copyState === 'email' ? 'Copied!' : 'Copy'}
+                          </button>
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-muted-foreground">Temp password</dt>
+                        <dd className="flex items-center gap-2">
+                          <code className="rounded bg-background/60 px-2 py-0.5 font-mono text-foreground">
+                            {showPassword ? coderTempPassword : '•'.repeat(Math.min(coderTempPassword.length, 12))}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((s) => !s)}
+                            className="inline-flex h-7 items-center justify-center rounded-sm border border-border px-2 hover:bg-accent hover:text-accent-foreground"
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showPassword ? (
+                              <EyeOff className="h-3.5 w-3.5" />
+                            ) : (
+                              <Eye className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(coderTempPassword, 'password')}
+                            className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2 font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+                            aria-label="Copy password"
+                          >
+                            <Copy className="h-3 w-3" />
+                            {copyState === 'password' ? 'Copied!' : 'Copy'}
+                          </button>
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="text-xs text-muted-foreground">
+                      Use these if Coder asks you to log in. The password is shown only this once.
+                    </p>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
           )}
 
           <WorkspaceStats sandboxId={initial.id} enabled variant="wide" />
@@ -293,6 +345,10 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
                   </div>
                 </div>
               );
+              const href =
+                l.viaCoderLogin && l.url
+                  ? coderLoginHref(initial.id, l.url)
+                  : l.url ?? '#';
               return disabled ? (
                 <div key={l.label} className={cardClass}>
                   {content}
@@ -300,7 +356,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
               ) : (
                 <a
                   key={l.label}
-                  href={l.url ?? '#'}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={cardClass}
