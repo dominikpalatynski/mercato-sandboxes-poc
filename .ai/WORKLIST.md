@@ -30,6 +30,30 @@ Working surfaces:
 
 ## Remaining Follow-Up
 
+- Fix the Open Mercato splash screen target URL:
+  - Splash must display the browser-facing app URL, not `localhost:3000` or an
+    internal runtime URL.
+  - Splash should redirect/open the correct app address:
+    `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me`.
+  - This may belong upstream in `open-mercato` rather than this repo. Prefer an
+    Open Mercato fix if the splash runtime ignores `APP_URL` /
+    `NEXT_PUBLIC_APP_URL`; keep only temporary sandbox patches here.
+- Add a workspace shell welcome message:
+  - Explain that `codex`, `opencode`, and `claude` are available.
+  - Show where Open Mercato logs live: `/tmp/mercato-dev.log`,
+    `/tmp/code-server.log`, and `/tmp/mercato-agentic-init.log`.
+  - Explain that `yarn setup` / dev is started by the Coder startup script.
+  - If the dev command is converted from `nohup ... &` to an interactive job,
+    document `jobs` and `fg <job>` for bringing `yarn dev` back to the
+    foreground; otherwise do not claim `fg` works for the current background
+    process model.
+- Improve workspace developer bootstrap:
+  - Install GitHub CLI `gh` in `mercato-workspace`.
+  - Keep `git` installed and verify it is available in fresh workspaces.
+  - Initialize `/home/coder/app` as a local git repository after
+    `create-mercato-app` if it is not already a repo.
+  - Make interactive shells start in `/home/coder/app` by default so users land
+    directly in the app folder.
 - Trust `.runtime/tls/sandbox-lvh-me.crt` in the local OS/browser keychain to remove privacy warnings.
 - For production, replace the generated local cert with a real wildcard cert covering:
   - `${SANDBOX_DOMAIN}`

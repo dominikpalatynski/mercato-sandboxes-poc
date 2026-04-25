@@ -49,6 +49,15 @@ handoff notes live in `.ai/`.
 - Open Mercato’s first `yarn setup` can take several minutes after Coder marks
   the agent connected. VS Code and terminal should be usable before the app on
   port 3000 finishes compiling.
+- The splash screen URL handling may need an upstream Open Mercato fix. The
+  sandbox already sets `APP_URL`, `NEXT_PUBLIC_APP_URL`, and
+  `APP_ALLOWED_ORIGINS` to the Coder wildcard app URL; if splash still shows or
+  redirects to localhost/internal addresses, fix Open Mercato's splash/runtime
+  URL resolution instead of adding more brittle generated-file patches here.
+- Shell onboarding should be explicit: future work should add a workspace
+  login banner with the available AI CLIs and log locations. Only mention
+  `fg <job>` if the workspace actually starts the dev process as an interactive
+  shell job rather than with `nohup`.
 
 ## Verification
 
