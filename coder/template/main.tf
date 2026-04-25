@@ -136,6 +136,17 @@ resource "coder_agent" "main" {
       sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgres://mercato:mercato@workspace-pg:5432/mercato#" .env
       grep -q '^OM_DEV_AUTO_OPEN=' .env || echo "OM_DEV_AUTO_OPEN=0" >> .env
       grep -q '^OM_DEV_SPLASH_PORT=' .env || echo "OM_DEV_SPLASH_PORT=4000" >> .env
+      # Public URL of THIS sandbox served via Caddy. Setting APP_URL and
+      # NEXT_PUBLIC_APP_URL lets Mercato:
+      #   1. derive Next 15's allowedDevOrigins (PR #1592) so HMR + font
+      #      requests from open-mercato-1.sandbox.lvh.me aren't blocked
+      #      cross-origin
+      #   2. show the right external URL in the splash ("Aktualny adres")
+      #      and any user-visible links — instead of localhost:3000
+      sed -i "s#^APP_URL=.*#APP_URL=${local.app_url}#" .env || true
+      grep -q '^APP_URL=' .env || echo "APP_URL=${local.app_url}" >> .env
+      sed -i "s#^NEXT_PUBLIC_APP_URL=.*#NEXT_PUBLIC_APP_URL=${local.app_url}#" .env || true
+      grep -q '^NEXT_PUBLIC_APP_URL=' .env || echo "NEXT_PUBLIC_APP_URL=${local.app_url}" >> .env
       yarn install
       # Bootstrap the agentic AI tooling (Claude Code / Codex / opencode wiring)
       # so the dev box is ready for prompt-driven coding from the first start.

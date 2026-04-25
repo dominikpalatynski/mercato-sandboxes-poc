@@ -110,6 +110,10 @@ services:
     labels:
       caddy_0: http://coder.${SANDBOX_DOMAIN:-lvh.me}:80
       caddy_0.reverse_proxy: "{{upstreams 7080}}"
+      # caddy-docker-proxy passes WebSocket upgrades through automatically.
+      # Disable response buffering so long-lived streams (terminal output,
+      # agent stats) flush in real time.
+      caddy_0.reverse_proxy.flush_interval: "-1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
