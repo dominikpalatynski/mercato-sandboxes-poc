@@ -27,9 +27,18 @@ Working surfaces:
 - Split browser-facing Coder URL from workspace-agent bootstrap URL so fresh
   sandboxes can download/connect the Coder agent over the Docker network.
 - Moved specs and handoff docs into `.ai/` and added `AGENTS.md`.
+- Added an additive Kubernetes local path under `k8s/` with dedicated manifests,
+  scripts, Helm values, and a separate Kubernetes-specific Coder template.
 
 ## Remaining Follow-Up
 
+- Run the full Kubernetes local path on a machine with `docker`, `k3d`,
+  `kubectl`, and `helm` installed:
+  - create the cluster, import local images, install Coder, bootstrap the admin
+    token, push the Kubernetes template, and verify onboarding plus the
+    wildcard workspace routes on `:8443`
+  - record any ingress, PVC, or template RBAC gaps discovered during the first
+    real cluster smoke
 - Fix the Open Mercato splash screen target URL:
   - Splash must display the browser-facing app URL, not `localhost:3000` or an
     internal runtime URL.

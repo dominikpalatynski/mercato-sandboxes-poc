@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-onboarding-data
+  namespace: mercato-sandboxes
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-onboarding
+  namespace: mercato-sandboxes
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres-onboarding
+  template:
+    metadata:
+      labels:
+        app: postgres-onboarding
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: onboarding
+            - name: POSTGRES_PASSWORD
+              value: onboarding
+            - name: POSTGRES_DB
+              value: onboarding
+          ports:
+            - containerPort: 5432
+              name: postgres
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U onboarding -d onboarding
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U onboarding -d onboarding
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-onboarding-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-onboarding
+  namespace: mercato-sandboxes
+spec:
+  selector:
+    app: postgres-onboarding
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding
+  namespace: mercato-sandboxes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: onboarding
+  template:
+    metadata:
+      labels:
+        app: onboarding
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: migrate-db
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h postgres-onboarding -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                sleep 2
+              done
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+              psql \
+                -v ON_ERROR_STOP=1 \
+                -h postgres-onboarding \
+                -U "$POSTGRES_USER" \
+                -d "$POSTGRES_DB" \
+                -f /etc/onboarding/schema.sql
+          env:
+            - name: POSTGRES_USER
+              value: onboarding
+            - name: POSTGRES_PASSWORD
+              value: onboarding
+            - name: POSTGRES_DB
+              value: onboarding
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: onboarding-schema
+              mountPath: /etc/onboarding
+              readOnly: true
+      containers:
+        - name: onboarding
+          image: mercato-onboarding:k8s-local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: POSTGRES_URL
+              value: postgres://onboarding:onboarding@postgres-onboarding:5432/onboarding
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: onboarding-config
+                  key: jwt-secret
+            - name: CODER_URL
+              value: http://coder.mercato-sandboxes.svc.cluster.local
+            - name: CODER_PUBLIC_URL
+              value: https://coder.sandbox.lvh.me:8443
+            - name: WILDCARD_APPS_DOMAIN
+              value: apps.sandbox.lvh.me
+            - name: CODER_ADMIN_TOKEN_FILE
+              value: /run/secrets/coder-admin-token
+            - name: CODER_TEMPLATE_ID_FILE
+              value: /run/secrets/coder-template-id
+            - name: COOKIE_DOMAIN
+              value: .sandbox.lvh.me
+            - name: COOKIE_SECURE
+              value: "true"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              cpu: "2"
+              memory: 1536Mi
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: coder-secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: onboarding-schema
+          configMap:
+            name: onboarding-schema
+            items:
+              - key: schema.sql
+                path: schema.sql
+        - name: coder-secrets
+          secret:
+            secretName: onboarding-coder-secrets
+            items:
+              - key: coder-admin-token
+                path: coder-admin-token
+              - key: coder-template-id
+                path: coder-template-id

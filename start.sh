@@ -54,15 +54,12 @@ mkdir -p .runtime
 TLS_DIR=".runtime/tls"
 TLS_CERT="${TLS_DIR}/sandbox-lvh-me.crt"
 TLS_KEY="${TLS_DIR}/sandbox-lvh-me.key"
-if [ ! -f "$TLS_CERT" ] || [ ! -f "$TLS_KEY" ]; then
-  echo "[start] generating local TLS certificate for ${SANDBOX_DOMAIN}…"
-  mkdir -p "$TLS_DIR"
-  openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
-    -keyout "$TLS_KEY" \
-    -out "$TLS_CERT" \
-    -subj "/CN=${SANDBOX_DOMAIN}" \
-    -addext "subjectAltName=DNS:${SANDBOX_DOMAIN},DNS:*.${SANDBOX_DOMAIN},DNS:${WILDCARD_APPS_DOMAIN},DNS:*.${WILDCARD_APPS_DOMAIN}" >/dev/null 2>&1
-fi
+ROOT_DIR="$(pwd)" \
+SANDBOX_DOMAIN="${SANDBOX_DOMAIN}" \
+WILDCARD_APPS_DOMAIN="${WILDCARD_APPS_DOMAIN}" \
+TLS_CERT_FILE="${TLS_CERT}" \
+TLS_KEY_FILE="${TLS_KEY}" \
+  bash scripts/ensure-local-tls.sh
 
 echo "[start] bringing up control-plane services (coder + postgres + edge)…"
 docker compose up -d postgres-coder postgres-onboarding coder edge

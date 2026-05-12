@@ -31,6 +31,41 @@ services on the `mercato-proxy` network.
 `.runtime/tls/sandbox-lvh-me.crt` and `.runtime/tls/sandbox-lvh-me.key` if
 missing. Trust the certificate locally to avoid browser privacy warnings.
 
+## Additive Kubernetes Local Path
+
+The Docker Compose flow remains the default local path. An additive Kubernetes
+path lives under `k8s/` and must not mutate the Compose stack or the existing
+Docker template.
+
+The Kubernetes local path uses:
+
+- one `k3d` cluster
+- `ingress-nginx` for host-based routing
+- `kubectl port-forward` to expose ingress locally on `:8443`
+- the same onboarding app contract for `CODER_URL`, `CODER_PUBLIC_URL`,
+  `CODER_ADMIN_TOKEN_FILE`, and `CODER_TEMPLATE_ID_FILE`
+- a separate Kubernetes-specific Coder template under `k8s/coder-template/`
+
+The local Kubernetes URLs are:
+
+- `https://sandbox.lvh.me:8443`
+- `https://coder.sandbox.lvh.me:8443`
+- `https://13337--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
+- `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
+- `https://4000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
+
+In this mode, each workspace is provisioned as one Kubernetes `Deployment`
+containing:
+
+- one `mercato-workspace` container running the Coder agent, code-server, and
+  the Mercato app
+- one sidecar PostgreSQL container
+- one PVC for `/home/coder`
+- one PVC for PostgreSQL data
+
+The Kubernetes path reuses the local TLS certificate files under `.runtime/tls`
+by projecting them into a Kubernetes TLS secret for ingress termination.
+
 ## Runtime Services
 
 | Service | Role |
@@ -91,6 +126,9 @@ transport through reverse proxies.
 8. `Open Splash` loads on the wildcard app host.
 9. All links are wrapped by `/api/coder-login` when leaving onboarding so the
    browser has a `coder_session_token` before reaching Coder.
+10. `k8s/` provides an additive local Kubernetes workflow that keeps the same
+    onboarding contract and exposes onboarding, Coder, and wildcard apps
+    through ingress on `:8443` via `kubectl port-forward`.
 
 ## Production Notes
 

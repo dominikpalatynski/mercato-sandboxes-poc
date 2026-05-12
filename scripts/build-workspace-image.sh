@@ -23,5 +23,24 @@ echo "[build-workspace-image] building ${IMAGE} for ${PLATFORM}..."
 docker build --platform "$PLATFORM" -t "$IMAGE" ./coder/workspace-image
 
 size_bytes=$(docker image inspect "$IMAGE" --format '{{.Size}}')
-size_human=$(printf '%s' "$size_bytes" | numfmt --to=iec)
+if command -v numfmt >/dev/null 2>&1; then
+  size_human=$(printf '%s' "$size_bytes" | numfmt --to=iec)
+else
+  size_human=$(awk -v bytes="$size_bytes" '
+    BEGIN {
+      split("B KiB MiB GiB TiB PiB", units, " ")
+      size = bytes + 0
+      unit = 1
+      while (size >= 1024 && unit < length(units)) {
+        size /= 1024
+        unit++
+      }
+      if (unit == 1) {
+        printf "%d%s", size, units[unit]
+      } else {
+        printf "%.1f%s", size, units[unit]
+      }
+    }
+  ')
+fi
 echo "[build-workspace-image] done. ${IMAGE} size: ${size_human}"
