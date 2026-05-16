@@ -39,26 +39,12 @@ terraform {
 # Template-level variables — forwarded from .env via push-template.sh
 # (`user_variable_values`).
 #
-# AI keys: surfaced inside each workspace container as OPENAI_API_KEY /
-# ANTHROPIC_API_KEY for the preinstalled AI CLIs.
+# AI access is configured per user through Coder user secrets. The template
+# only publishes non-secret provider defaults for Codex + Claude.
 #
 # Networking vars: drive the user-facing URLs the edge proxy publishes for
 # each workspace. Defaults match the local-dev setup (lvh.me on HTTPS :443).
 ###############################################################################
-
-variable "openai_api_key" {
-  type        = string
-  sensitive   = true
-  default     = ""
-  description = "Forwarded to each workspace as OPENAI_API_KEY for opencode/codex CLIs"
-}
-
-variable "anthropic_api_key" {
-  type        = string
-  sensitive   = true
-  default     = ""
-  description = "Forwarded as ANTHROPIC_API_KEY for the claude CLI"
-}
 
 variable "sandbox_domain" {
   type        = string
@@ -161,6 +147,21 @@ resource "coder_agent" "main" {
     set -e
     # 1. start code-server
     code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
+
+    mkdir -p "$HOME/.codex"
+    if [ ! -f "$HOME/.codex/config.toml" ] || grep -q "open-mercato managed openrouter profile" "$HOME/.codex/config.toml"; then
+      cat > "$HOME/.codex/config.toml" <<'EOF'
+# open-mercato managed openrouter profile
+model = "openai/gpt-5"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+EOF
+    fi
 
     # 2. on first boot only: scaffold mercato app + patch .env + install deps
     if [ ! -d "$HOME/app" ]; then
@@ -468,8 +469,8 @@ resource "docker_container" "workspace" {
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
-    "OPENAI_API_KEY=${var.openai_api_key}",
-    "ANTHROPIC_API_KEY=${var.anthropic_api_key}",
+    "ANTHROPIC_BASE_URL=https://openrouter.ai/api",
+    "ANTHROPIC_API_KEY=",
   ]
 
   # Private network for postgres sidecar.

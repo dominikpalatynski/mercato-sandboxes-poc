@@ -20,6 +20,11 @@ fully templatized yet.
 - local TLS files at `.runtime/tls/sandbox-lvh-me.crt` and
   `.runtime/tls/sandbox-lvh-me.key`
 
+For the hybrid flow where onboarding runs outside Kubernetes, you also need:
+
+- `node`
+- `npm`
+
 If the TLS files do not exist yet, `k8s/scripts/cluster-create.sh` generates
 them automatically in `.runtime/tls/`, reusing the same local certificate path
 as the Docker Compose flow.
@@ -48,6 +53,138 @@ bash k8s/scripts/push-template.sh
 bash k8s/scripts/refresh-onboarding-secrets.sh
 ```
 
+## Hybrid Flow: Coder + Postgres in K8s, Onboarding Local
+
+Use this when you want:
+
+- `coder` in Kubernetes
+- `postgres-coder` in Kubernetes
+- `postgres-onboarding` in Kubernetes
+- the onboarding app locally for fast Next.js iteration
+
+This flow skips the Kubernetes onboarding deployment entirely. The cluster only
+hosts Coder, both PostgreSQL instances, and ingress for `coder.sandbox.lvh.me`
+plus the wildcard workspace apps.
+
+### 1. Prepare the cluster
+
+```bash
+cp k8s/env/local.env.example k8s/env/local.env
+$EDITOR k8s/env/local.env
+
+bash k8s/scripts/setup-local-hybrid.sh
+```
+
+What this does:
+
+- creates or reuses the `k3d` cluster
+- imports only the workspace image into `k3d`
+- deploys `postgres-coder` and `postgres-onboarding`
+- installs `coder`
+- creates the TLS secret
+- applies a Coder-only ingress for:
+  - `https://coder.sandbox.lvh.me:8443`
+  - `https://*.apps.sandbox.lvh.me:8443`
+
+### 2. Keep the hybrid port-forwards open
+
+Run this in a dedicated shell and leave it running:
+
+```bash
+bash k8s/scripts/port-forward-hybrid.sh
+```
+
+This exposes:
+
+- ingress HTTPS on `https://coder.sandbox.lvh.me:8443`
+- direct local Coder API on `http://127.0.0.1:18080`
+- onboarding Postgres on `127.0.0.1:5545`
+- Coder Postgres on `127.0.0.1:5546`
+
+The direct `http://127.0.0.1:18080` forward is intentional. The local
+onboarding Node process uses it for server-to-server Coder API calls so you do
+not have to make Node trust the self-signed ingress certificate.
+
+### 3. Bootstrap Coder and publish the K8s template
+
+In another shell:
+
+```bash
+bash k8s/scripts/bootstrap-coder.sh
+bash k8s/scripts/push-template.sh
+```
+
+That writes:
+
+- `.runtime/k8s/coder-admin-token`
+- `.runtime/k8s/coder-template-id`
+
+The local onboarding helper reads those files directly, so
+`refresh-onboarding-secrets.sh` is not needed in this hybrid mode.
+
+### 4. Install onboarding dependencies once
+
+```bash
+cd apps/onboarding
+npm ci
+cd ../..
+```
+
+### 5. Run onboarding locally
+
+```bash
+bash k8s/scripts/run-onboarding-local.sh
+```
+
+The helper:
+
+- points `POSTGRES_URL` at `postgres-onboarding` through the local forward
+- points `CODER_URL` at the local direct Coder API forward
+- keeps `CODER_PUBLIC_URL=https://coder.sandbox.lvh.me:8443`
+- reuses `.runtime/k8s/coder-admin-token` and `.runtime/k8s/coder-template-id`
+- sets `COOKIE_DOMAIN=.sandbox.lvh.me`
+- sets `COOKIE_SECURE=false` so the local HTTP dev server can issue cookies
+
+Open the local app at:
+
+- `http://sandbox.lvh.me:3000`
+
+Do not use `http://localhost:3000` in this flow. The onboarding app sets
+shared cookies for `.sandbox.lvh.me`, so using `sandbox.lvh.me` keeps the
+one-click login bridge into `coder.sandbox.lvh.me` working.
+
+### 6. What should work
+
+- onboarding UI: `http://sandbox.lvh.me:3000`
+- coder: `https://coder.sandbox.lvh.me:8443`
+- terminal: `https://coder.sandbox.lvh.me:8443/@<user>/<workspace>/terminal`
+- VS Code:
+  `https://13337--main--<workspace>--<user>.apps.sandbox.lvh.me:8443/?folder=/home/coder/app`
+- app:
+  `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
+- splash:
+  `https://4000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
+
+### 7. Useful operator commands
+
+Rebuild and reimport only the workspace image:
+
+```bash
+bash k8s/scripts/import-images.sh --workspace-only
+```
+
+Reconnect to the onboarding database locally:
+
+```bash
+psql postgres://onboarding:onboarding@127.0.0.1:5545/onboarding
+```
+
+Reconnect to the Coder database locally:
+
+```bash
+psql postgres://coder:coder@127.0.0.1:5546/coder
+```
+
 ## Local URLs
 
 - `https://sandbox.lvh.me:8443`
@@ -60,6 +197,10 @@ bash k8s/scripts/refresh-onboarding-secrets.sh
 
 - The onboarding app keeps the existing `CODER_URL`, `CODER_PUBLIC_URL`,
   `CODER_ADMIN_TOKEN_FILE`, and `CODER_TEMPLATE_ID_FILE` contract.
+- `setup-local-hybrid.sh` applies
+  [ingress-coder-only.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/k8s/manifests/local/ingress-coder-only.yaml)
+  so the hybrid flow does not depend on an onboarding Service inside the
+  cluster.
 - If `setup-local.sh` reports a `0.0.0.0:<port>` connection refusal while
   `cluster-create.sh` says it is reusing an existing cluster, the saved `k3d`
   context is stale. The script now recreates the cluster automatically when it

@@ -134,8 +134,8 @@ export default async function Home() {
             <CardContent>
               <CardDescription>
                 opencode, codex, and claude code CLIs are pre-installed in
-                every workspace. Bring your OpenAI / Anthropic key and start
-                prompting.
+                every workspace. Paid AI access is provisioned per user through
+                OpenRouter-backed Coder secrets.
               </CardDescription>
             </CardContent>
           </Card>

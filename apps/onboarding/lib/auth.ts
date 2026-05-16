@@ -1,4 +1,3 @@
-import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { NextResponse } from 'next/server';
@@ -11,6 +10,20 @@ export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 export interface SessionPayload extends JWTPayload {
   sub: string;       // user id
   email: string;
+}
+
+function sessionCookieDomain(): string | undefined {
+  const domain = process.env.COOKIE_DOMAIN?.trim();
+  return domain || undefined;
+}
+
+function baseSessionCookieOptions() {
+  return {
+    httpOnly: true as const,
+    sameSite: 'lax' as const,
+    secure: process.env.COOKIE_SECURE === 'true',
+    path: '/',
+  };
 }
 
 function getSecret(): Uint8Array {
@@ -48,11 +61,21 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
   }
 }
 
+async function verifyAnySession(tokens: string[]): Promise<SessionPayload | null> {
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index];
+    if (!token) continue;
+    const session = await verifySession(token);
+    if (session) return session;
+  }
+  return null;
+}
+
 export async function getSession(): Promise<SessionPayload | null> {
   const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  return verifySession(token);
+  const tokens = store.getAll(SESSION_COOKIE).map((cookie) => cookie.value);
+  if (tokens.length === 0) return null;
+  return verifyAnySession(tokens);
 }
 
 export async function requireSession(): Promise<SessionPayload> {
@@ -69,12 +92,15 @@ export async function requireSession(): Promise<SessionPayload> {
  */
 export async function requireSessionFromRequest(req: Request): Promise<SessionPayload> {
   const cookieHeader = req.headers.get('cookie') || '';
-  const match = cookieHeader.split(/;\s*/).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
-  const token = match ? decodeURIComponent(match.slice(SESSION_COOKIE.length + 1)) : '';
-  if (!token) {
+  const tokens = cookieHeader
+    .split(/;\s*/)
+    .filter((cookie) => cookie.startsWith(`${SESSION_COOKIE}=`))
+    .map((cookie) => decodeURIComponent(cookie.slice(SESSION_COOKIE.length + 1)))
+    .filter(Boolean);
+  if (tokens.length === 0) {
     throw NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const session = await verifySession(token);
+  const session = await verifyAnySession(tokens);
   if (!session) {
     throw NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -82,13 +108,24 @@ export async function requireSessionFromRequest(req: Request): Promise<SessionPa
 }
 
 export function sessionCookieOptions() {
-  const domain = process.env.COOKIE_DOMAIN?.trim();
   return {
-    httpOnly: true as const,
-    sameSite: 'lax' as const,
-    secure: process.env.COOKIE_SECURE === 'true',
-    path: '/',
+    ...baseSessionCookieOptions(),
     maxAge: SESSION_MAX_AGE_SECONDS,
-    ...(domain ? { domain } : {}),
+    ...(sessionCookieDomain() ? { domain: sessionCookieDomain() } : {}),
   };
+}
+
+export function clearSessionCookie(response: NextResponse): void {
+  const clearOptions = {
+    ...baseSessionCookieOptions(),
+    maxAge: 0,
+  };
+  response.cookies.set(SESSION_COOKIE, '', clearOptions);
+  const domain = sessionCookieDomain();
+  if (domain) {
+    response.cookies.set(SESSION_COOKIE, '', {
+      ...clearOptions,
+      domain,
+    });
+  }
 }

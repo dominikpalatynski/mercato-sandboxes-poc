@@ -1,4 +1,3 @@
-import 'server-only';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
@@ -37,7 +36,7 @@ export const coderPublicUrl = CODER_PUBLIC_URL;
 export interface CoderUserRef {
   id: string;
   username: string;
-  tempPassword: string;
+  tempPassword: string | null;
 }
 
 export interface CoderWorkspaceRef {
@@ -79,6 +78,24 @@ export interface CoderWorkspaceMetadata {
   lifecycleState: string | null;
 }
 
+export interface UserSecret {
+  id: string;
+  name: string;
+  description: string | null;
+  env_name: string | null;
+  file_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserSecretInput {
+  name: string;
+  value: string;
+  description?: string;
+  env_name?: string;
+  file_path?: string;
+}
+
 export interface CoderLogLine {
   id: number;
   created_at: string;
@@ -101,6 +118,12 @@ export class CoderApiError extends Error {
     super(message);
     this.name = 'CoderApiError';
   }
+}
+
+interface CoderUserLookup {
+  id: string;
+  username: string;
+  email: string | null;
 }
 
 export async function coderFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -152,6 +175,24 @@ function randomSuffix(): string {
   return randomBytes(3).toString('base64url').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 4) || 'x';
 }
 
+async function getCoderUser(identifier: string): Promise<CoderUserLookup | null> {
+  try {
+    const user = await coderFetch<{ id: string; username: string; email?: string | null }>(
+      `/api/v2/users/${encodeURIComponent(identifier)}`,
+    );
+    return {
+      id: user.id,
+      username: user.username,
+      email: typeof user.email === 'string' ? user.email : null,
+    };
+  } catch (error) {
+    if (error instanceof CoderApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
   const orgId = await getOrgId();
   const tempPassword = generateTempPassword();
@@ -178,6 +219,16 @@ export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
     } catch (e) {
       lastErr = e;
       if (e instanceof CoderApiError) {
+        if (e.status === 409 && /user already exists/i.test(e.body)) {
+          const existing = await getCoderUser(baseUsername);
+          if (existing && existing.email?.toLowerCase() === email.toLowerCase()) {
+            return {
+              id: existing.id,
+              username: existing.username,
+              tempPassword: null,
+            };
+          }
+        }
         const taken = e.status === 409 || (e.status === 400 && /already taken|exists|in use/i.test(e.body));
         if (taken) continue;
       }
@@ -187,6 +238,54 @@ export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
   throw lastErr instanceof Error
     ? lastErr
     : new Error('Failed to create Coder user after retries');
+}
+
+export async function createUserSecret(user: string, input: UserSecretInput): Promise<UserSecret> {
+  return coderFetch<UserSecret>(`/api/v2/users/${user}/secrets`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateUserSecret(
+  user: string,
+  name: string,
+  input: Omit<UserSecretInput, 'name'>,
+): Promise<UserSecret> {
+  return coderFetch<UserSecret>(`/api/v2/users/${user}/secrets/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteUserSecret(user: string, name: string): Promise<void> {
+  await coderFetch(`/api/v2/users/${user}/secrets/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getUserSecret(user: string, name: string): Promise<UserSecret | null> {
+  try {
+    return await coderFetch<UserSecret>(`/api/v2/users/${user}/secrets/${encodeURIComponent(name)}`);
+  } catch (error) {
+    if (error instanceof CoderApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function upsertUserSecret(user: string, input: UserSecretInput): Promise<UserSecret> {
+  const existing = await getUserSecret(user, input.name);
+  if (!existing) {
+    return createUserSecret(user, input);
+  }
+  return updateUserSecret(user, input.name, {
+    value: input.value,
+    description: input.description,
+    env_name: input.env_name,
+    file_path: input.file_path,
+  });
 }
 
 export async function createWorkspace(coderUserId: string, name: string): Promise<CoderWorkspaceRef> {

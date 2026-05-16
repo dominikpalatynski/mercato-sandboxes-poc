@@ -11,20 +11,6 @@ terraform {
   }
 }
 
-variable "openai_api_key" {
-  type        = string
-  sensitive   = true
-  default     = ""
-  description = "Forwarded to each workspace as OPENAI_API_KEY for Codex and related CLIs."
-}
-
-variable "anthropic_api_key" {
-  type        = string
-  sensitive   = true
-  default     = ""
-  description = "Forwarded to each workspace as ANTHROPIC_API_KEY for the Claude CLI."
-}
-
 variable "sandbox_domain" {
   type        = string
   default     = "sandbox.lvh.me"
@@ -145,9 +131,24 @@ resource "coder_agent" "main" {
 
     code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
 
+    mkdir -p "$HOME/.codex"
+    if [ ! -f "$HOME/.codex/config.toml" ] || grep -q "open-mercato managed openrouter profile" "$HOME/.codex/config.toml"; then
+      cat > "$HOME/.codex/config.toml" <<'EOF'
+# open-mercato managed openrouter profile
+model = "openai/gpt-5"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+EOF
+    fi
+
     if [ ! -d "$HOME/app" ]; then
       cd "$HOME"
-      npx -y create-mercato-app app --skip-agentic-setup
+      npx -y create-mercato-app app --preset crm --skip-agentic-setup
       cd app
       cp .env.example .env
       sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgres://mercato:mercato@127.0.0.1:5432/mercato#" .env
@@ -409,13 +410,13 @@ resource "kubernetes_deployment_v1" "workspace" {
           }
 
           env {
-            name  = "OPENAI_API_KEY"
-            value = var.openai_api_key
+            name  = "ANTHROPIC_BASE_URL"
+            value = "https://openrouter.ai/api"
           }
 
           env {
             name  = "ANTHROPIC_API_KEY"
-            value = var.anthropic_api_key
+            value = ""
           }
 
           env {

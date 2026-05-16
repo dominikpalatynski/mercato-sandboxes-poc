@@ -34,9 +34,14 @@ export default function NewSandboxForm() {
       const data = (await res.json().catch(() => ({}))) as {
         id?: string;
         error?: string;
+        code?: string;
       };
       if (!res.ok) {
-        setError(data.error || `HTTP ${res.status}`);
+        if (data.code === 'ai_entitlement_required') {
+          setError('Activate paid AI access on the dashboard before creating a sandbox.');
+        } else {
+          setError(data.error || `HTTP ${res.status}`);
+        }
         setBusy(false);
         return;
       }
@@ -53,7 +58,8 @@ export default function NewSandboxForm() {
         <CardHeader className="space-y-2">
           <CardTitle>Create a new sandbox</CardTitle>
           <CardDescription>
-            Provisioning typically takes 2-4 minutes once you submit.
+            Provisioning typically takes 2-4 minutes once you submit. Paid AI access must already
+            be active for sandbox creation to start.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

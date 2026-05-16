@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { verifyPassword, signSession, sessionCookieOptions, SESSION_COOKIE } from '@/lib/auth';
+import {
+  verifyPassword,
+  signSession,
+  sessionCookieOptions,
+  clearSessionCookie,
+  SESSION_COOKIE,
+} from '@/lib/auth';
 
 const Body = z.object({
   email: z.string().email().max(254),
@@ -36,6 +42,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const token = await signSession({ sub: user.id, email: user.email });
   const res = NextResponse.json({ ok: true, redirect: '/dashboard' }, { status: 200 });
+  clearSessionCookie(res);
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
 }

@@ -74,7 +74,7 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
 ## ⚡ Quick start
 
 ```bash
-cp .env.example .env       # set OPENAI_API_KEY (and optionally ANTHROPIC_API_KEY)
+cp .env.example .env
 ./start.sh                 # ~3 min on first run, ~30 s afterwards
 open https://sandbox.lvh.me # sign up and create your sandbox
 ```
@@ -139,13 +139,13 @@ The Coder agent reports `ready` as soon as the startup script returns, so the **
 
 ## 🤖 AI CLIs
 
-`opencode`, `codex`, and `claude` are on PATH inside every workspace terminal. Set `OPENAI_API_KEY` and (optionally) `ANTHROPIC_API_KEY` in `.env` **before** running `./start.sh` so the template picks them up. If you change the keys later, rerun:
+`opencode`, `codex`, and `claude` are on PATH inside every workspace terminal. Sandbox billing now provisions per-user OpenRouter-backed Coder secrets from the onboarding app, so shared `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` template variables are no longer required for Codex and Claude. After template changes, rerun:
 
 ```bash
 bash scripts/push-template.sh
 ```
 
-Workspaces created **before** the keys were set will not have them — recreate those workspaces from the onboarding UI.
+Workspaces created **before** the template update will still have the old shared-key behavior until they are recreated.
 
 ## 🚀 Deploying to production
 
@@ -177,6 +177,25 @@ make stop    # docker compose down (preserves volumes)
 make reset   # docker compose down -v + wipe .runtime/ (irreversible)
 make test    # run the Playwright happy-path suite
 ```
+
+### Mock PayByLink
+
+To test `POST /api/billing/checkout` without the real provider:
+
+```bash
+node scripts/mock-paybylink.js
+```
+
+Then point onboarding at the mock:
+
+```bash
+export PAYBYLINK_API_BASE_URL=http://127.0.0.1:9999/api/v1
+export PAYBYLINK_SHOP_ID=123
+export PAYBYLINK_PRIVATE_KEY=test-private-key
+```
+
+The mock only implements `POST /api/v1/transfer/generate`, which is enough for
+checkout-link generation. It does not simulate the paid webhook.
 
 ## 🧪 Tests
 

@@ -29,6 +29,12 @@ Working surfaces:
 - Moved specs and handoff docs into `.ai/` and added `AGENTS.md`.
 - Added an additive Kubernetes local path under `k8s/` with dedicated manifests,
   scripts, Helm values, and a separate Kubernetes-specific Coder template.
+- Implemented OpenRouter billing and key provisioning in `apps/onboarding`,
+  including billing tables, PayByLink checkout/webhook routes, OpenRouter key
+  orchestration, per-user Coder secret sync, dashboard billing summary, and a
+  sandbox entitlement guard. Both Coder templates now bootstrap Codex +
+  Claude from non-secret OpenRouter settings plus per-user secrets instead of
+  shared template API keys.
 
 ## Remaining Follow-Up
 
@@ -91,3 +97,26 @@ Working surfaces:
   the last interrupted run reached workspace-ready and passed the Coder API
   check, but the final browser click test was stopped while Docker Desktop's
   host port forwarder was being restarted.
+- Run a live OpenRouter / PayByLink / Coder smoke after provider credentials are
+  configured:
+  - create an activation checkout and confirm the paid webhook creates
+    `llm_accounts`, usage snapshots, and per-user Coder secrets
+  - confirm repeated webhook delivery is harmless and a top-up reuses the same
+    account/key rather than creating a second active account
+  - recreate a paid workspace and verify Codex plus Claude authenticate inside
+    the workspace through the OpenRouter-backed secret flow
+  - note the current local verification already covers automated tests plus
+    `next build` through compile/type/static generation; the final standalone
+    trace copy is blocked locally by `ENOSPC`
+- Implement GitHub account sync and workspace bootstrap per
+  `.ai/SPEC-GITHUB-WORKSPACE-BOOTSTRAP.md`:
+  - add encrypted GitHub account storage in `apps/onboarding/db/schema.sql`
+  - add GitHub connect/callback/status/disconnect routes in `apps/onboarding`
+  - install `gh` in the workspace image and configure git plus `gh auth
+    setup-git` during workspace startup
+  - extend sandbox creation to mint per-sandbox bootstrap tokens and pass
+    bootstrap parameters to Coder workspace creation
+  - add an internal onboarding bootstrap endpoint consumed by the workspace
+    startup script
+  - verify with API coverage for connect/bootstrap/disconnect logic and a
+    manual smoke for `gh auth status`, private `git clone`, and VS Code push
