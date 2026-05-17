@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ChevronDown, LayoutDashboard, LogOut, User } from 'lucide-react';
+import { ChevronDown, CreditCard, LayoutDashboard, LogOut } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -66,9 +66,9 @@ export function AccountMenu({ email }: AccountMenuProps) {
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href="/sandboxes" className="cursor-pointer">
-              <User className="h-4 w-4" />
-              My sandboxes
+            <Link href="/billing" className="cursor-pointer">
+              <CreditCard className="h-4 w-4" />
+              Billing
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

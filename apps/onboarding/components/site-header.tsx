@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { getSession } from '@/lib/auth';
+import { AuthenticatedNav } from '@/components/authenticated-nav';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AccountMenu } from '@/components/account-menu';
@@ -31,9 +32,7 @@ export async function SiteHeader() {
         <nav className="flex items-center gap-3 text-sm">
           {session ? (
             <>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/dashboard">Dashboard</Link>
-              </Button>
+              <AuthenticatedNav />
               <AccountMenu email={session.email} />
             </>
           ) : (

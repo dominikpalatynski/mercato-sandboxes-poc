@@ -58,6 +58,11 @@ Working surfaces:
   - the workspace bootstrap logic now lives in dedicated
     `files/workspace-startup.sh.tftpl` files instead of inline Terraform
     heredocs
+- Split billing away from the main onboarding dashboard:
+  - `/dashboard` now stays focused on sandbox creation and sandbox state
+  - AI entitlement, top-up, and usage details live on a dedicated `/billing`
+    page
+  - blocked sandbox creation on the dashboard now points users to billing
 
 ## Remaining Follow-Up
 

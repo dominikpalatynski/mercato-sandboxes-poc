@@ -13,6 +13,19 @@ Each workspace exposes:
 All user-facing routes must use standard HTTPS subdomain routing. Non-standard
 browser ports are not acceptable for the primary flow.
 
+## Onboarding Navigation
+
+Authenticated onboarding separates sandbox management from AI billing:
+
+- `/dashboard` is the sandbox-focused landing page with the create-sandbox CTA
+  and the user's current sandbox list.
+- `/billing` owns AI entitlement activation, top-ups, and the current usage
+  snapshot.
+
+When sandbox creation is blocked because AI access is inactive, onboarding
+should send the user to `/billing` instead of embedding the full billing UI on
+the main dashboard.
+
 ## Current Local Topology
 
 The local stack is published by one nginx `edge` container:
@@ -172,6 +185,9 @@ transport through reverse proxies.
 12. Sandbox creation offers the `crm`, `empty`, and `classic` Open Mercato
     presets and first boot runs the matching `create-mercato-app --preset ...`
     command inside the selected template.
+13. Authenticated onboarding exposes a dedicated `/billing` page for AI usage
+    and checkout actions, while `/dashboard` stays focused on sandbox
+    management.
 
 ## Production Notes
 

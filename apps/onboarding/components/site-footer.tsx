@@ -23,12 +23,20 @@ export async function SiteFooter() {
             Privacy
           </Link>
           {session ? (
-            <Link
-              href="/dashboard"
-              className="hover:text-foreground hover:underline underline-offset-4"
-            >
-              Dashboard
-            </Link>
+            <>
+              <Link
+                href="/dashboard"
+                className="hover:text-foreground hover:underline underline-offset-4"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/billing"
+                className="hover:text-foreground hover:underline underline-offset-4"
+              >
+                Billing
+              </Link>
+            </>
           ) : (
             <Link
               href="/login"

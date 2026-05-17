@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 
 import type { BillingSummary } from '@/lib/billing-types';
+import { formatRelative } from '@/lib/relative-time';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -33,7 +34,14 @@ function formatPln(amount: number | null | undefined): string {
   return `${amount.toFixed(2)} PLN`;
 }
 
-export default function BillingCard({ initialSummary }: Props): React.ReactElement {
+function formatObservedAt(value: string | null | undefined): string {
+  if (!value) {
+    return 'n/a';
+  }
+  return formatRelative(value);
+}
+
+export function BillingUsageCard({ initialSummary }: Props): React.ReactElement {
   const [creditsUsd, setCreditsUsd] = useState(
     initialSummary.llm_account ? String(Math.max(initialSummary.llm_account.limit_usd, 25)) : '50',
   );
@@ -84,13 +92,14 @@ export default function BillingCard({ initialSummary }: Props): React.ReactEleme
   return (
     <Card>
       <CardHeader>
-        <CardTitle>AI access and billing</CardTitle>
+        <CardTitle>Usage</CardTitle>
         <CardDescription>
-          Each sandbox needs an active paid AI entitlement before workspace creation is allowed.
+          Review AI entitlement status, current OpenRouter usage snapshots, and add more budget when
+          needed.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
               Status
@@ -114,10 +123,29 @@ export default function BillingCard({ initialSummary }: Props): React.ReactEleme
           </div>
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Usage this month
+            </div>
+            <div className="mt-1 text-sm font-medium text-foreground">
+              {formatUsd(initialSummary.latest_usage?.usage_monthly_usd)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
               Total observed usage
             </div>
             <div className="mt-1 text-sm font-medium text-foreground">
               {formatUsd(initialSummary.latest_usage?.usage_total_usd)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Latest snapshot
+            </div>
+            <div
+              className="mt-1 text-sm font-medium text-foreground"
+              title={initialSummary.latest_usage?.observed_at || undefined}
+            >
+              {formatObservedAt(initialSummary.latest_usage?.observed_at)}
             </div>
           </div>
           <div className="rounded-lg border border-border bg-muted/40 p-3">

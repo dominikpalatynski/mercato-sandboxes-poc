@@ -435,7 +435,7 @@ export async function createBillingCheckout(
       amountPln,
       description: buildCheckoutDescription(input.planType, creditsUsd),
       notifyUrl: new URL('/api/billing/paybylink/webhook', input.baseUrl).toString(),
-      returnUrlSuccess: new URL('/dashboard', input.baseUrl).toString(),
+      returnUrlSuccess: new URL('/billing', input.baseUrl).toString(),
     });
 
     await resolved.query(

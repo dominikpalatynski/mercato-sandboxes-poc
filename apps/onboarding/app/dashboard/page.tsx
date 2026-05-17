@@ -3,7 +3,6 @@ import { requireSession } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { getBillingSummaryForUser } from '@/lib/billing';
 import SandboxCards, { type DashboardSandbox } from './sandbox-cards';
-import BillingCard from './billing-card';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
 interface SandboxRow {
@@ -52,13 +51,15 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             New sandbox
           </Link>
         ) : (
-          <span className="rounded border border-border px-4 py-2 text-sm text-muted-foreground">
-            Activate AI access to create a sandbox
-          </span>
+          <Link
+            href="/billing"
+            className="rounded border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          >
+            Open billing to activate AI access
+          </Link>
         )}
       </div>
 
-      <BillingCard initialSummary={billingSummary} />
       <SandboxCards initial={initial} />
     </div>
   );

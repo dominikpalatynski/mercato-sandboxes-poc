@@ -365,6 +365,7 @@ test('createBillingCheckout creates a pending order and stores the provider orde
       },
     ],
   });
+  let checkoutReturnUrl: string | null = null;
 
   const result = await createBillingCheckout(
     {
@@ -373,11 +374,21 @@ test('createBillingCheckout creates a pending order and stores the provider orde
       creditsUsd: 50,
       baseUrl: 'https://sandbox.lvh.me',
     },
-    deps,
+    {
+      ...deps,
+      createPayByLinkCheckoutSession: async (input) => {
+        checkoutReturnUrl = input.returnUrlSuccess;
+        return {
+          providerOrderId: 'provider-order-1',
+          paymentUrl: 'https://pay.example.test/checkout',
+        };
+      },
+    },
   );
 
   assert.equal(result.order_id, 'order-1');
   assert.equal(result.plan_type, 'activation');
+  assert.equal(checkoutReturnUrl, 'https://sandbox.lvh.me/billing');
   assert.equal(state.orders.length, 1);
   assert.equal(state.orders[0]?.provider_order_id, 'provider-order-1');
   assert.equal(state.orders[0]?.status, 'pending');
