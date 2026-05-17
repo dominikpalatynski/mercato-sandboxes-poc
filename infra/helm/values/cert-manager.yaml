@@ -1,0 +1,51 @@
+crds:
+  enabled: true
+  keep: true
+
+nodeSelector:
+  node-pool: system
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+webhook:
+  nodeSelector:
+    node-pool: system
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: system
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+cainjector:
+  nodeSelector:
+    node-pool: system
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: system
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+startupapicheck:
+  nodeSelector:
+    node-pool: system
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: system
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule

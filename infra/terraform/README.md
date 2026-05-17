@@ -23,6 +23,7 @@ helper scripts under [`scripts/`](./scripts).
 - `terraform.tfvars.example`: versioned non-secret configuration
 - `scripts/install-master.sh`: install k3s server on `master-01`
 - `scripts/join-worker.sh`: join one sandbox worker to the cluster
+- `scripts/configure-master-node.sh`: apply system labels and optional taints
 - `scripts/configure-sandbox-node.sh`: apply sandbox labels/taints
 
 ## Usage
@@ -84,9 +85,30 @@ After `apply`, use the scripts to bootstrap k3s manually:
 bash infra/terraform/scripts/install-master.sh 10.0.1.10 MASTER_PUBLIC_IP
 bash infra/terraform/scripts/join-worker.sh 10.0.1.10 TOKEN_FROM_MASTER 10.0.1.20
 bash infra/terraform/scripts/join-worker.sh 10.0.1.10 TOKEN_FROM_MASTER 10.0.1.21
+bash infra/terraform/scripts/configure-master-node.sh
 bash infra/terraform/scripts/configure-sandbox-node.sh
 bash infra/terraform/scripts/configure-sandbox-node.sh worker-sandbox-02
 ```
+
+`configure-master-node.sh` sets:
+
+- `node-type=system`
+- `workload-type=system`
+- `node-pool=system`
+- `system=true`
+
+It can also add taints when needed:
+
+```bash
+TAINT_CONTROL_PLANE=true TAINT_SYSTEM=true \
+  bash infra/terraform/scripts/configure-master-node.sh
+```
+
+`configure-sandbox-node.sh` sets:
+
+- `node-type=sandbox`
+- `workload-type=sandbox`
+- `sandbox=true`
 
 The scripts intentionally keep the cluster setup explicit. That matches the MVP
 scope from `.ai/k3s-hetzner-opentofu-sandbox.md`, where OpenTofu stops at the
