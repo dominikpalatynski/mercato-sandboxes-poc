@@ -480,6 +480,17 @@ export async function cancelWorkspaceBuild(buildId: string): Promise<void> {
   await coderFetch(`/api/v2/workspacebuilds/${buildId}/cancel`, { method: 'PATCH' });
 }
 
+async function enqueueWorkspaceTransition(
+  id: string,
+  transition: 'start' | 'stop' | 'delete',
+  orphan = false,
+): Promise<void> {
+  await coderFetch(`/api/v2/workspaces/${id}/builds`, {
+    method: 'POST',
+    body: JSON.stringify({ transition, orphan }),
+  });
+}
+
 /**
  * Resolve the user-facing URL for a given app slug from a workspace's apps list.
  * - external apps: use the upstream `url` directly (e.g. http://localhost:30123).
@@ -519,10 +530,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
   // Enqueue the delete build. Coder runs terraform destroy asynchronously.
   // Returning before that finishes meant the workspace name stayed taken on
   // Coder's side, so an immediate re-create with the same name 409'd.
-  await coderFetch(`/api/v2/workspaces/${id}/builds`, {
-    method: 'POST',
-    body: JSON.stringify({ transition: 'delete', orphan: false }),
-  });
+  await enqueueWorkspaceTransition(id, 'delete');
 
   // Poll until the workspace is gone (404) or the build's job ends in a
   // terminal state. ~60s budget — plenty for terraform destroy of one
@@ -547,6 +555,14 @@ export async function deleteWorkspace(id: string): Promise<void> {
   // Don't throw — caller treats deleteWorkspace failures as non-fatal anyway,
   // but the DB row deletion will proceed and the user will see the stuck state
   // if Coder is genuinely wedged.
+}
+
+export async function startWorkspace(id: string): Promise<void> {
+  await enqueueWorkspaceTransition(id, 'start');
+}
+
+export async function stopWorkspace(id: string): Promise<void> {
+  await enqueueWorkspaceTransition(id, 'stop');
 }
 
 export function buildLinks(args: {

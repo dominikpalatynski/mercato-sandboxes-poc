@@ -87,3 +87,72 @@ test('ensureCoderUser reuses an existing Coder account after a create conflict',
     { method: 'GET', url: 'http://coder.test/api/v2/users/user' },
   ]);
 });
+
+test('startWorkspace and stopWorkspace enqueue the expected Coder transitions', async (t) => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'coder-test-'));
+  const tokenFile = path.join(tempDir, 'coder-admin-token');
+  writeFileSync(tokenFile, 'admin-token', 'utf8');
+
+  const previousFetch = globalThis.fetch;
+  const previousCoderUrl = process.env.CODER_URL;
+  const previousTokenFile = process.env.CODER_ADMIN_TOKEN_FILE;
+
+  process.env.CODER_URL = 'http://coder.test';
+  process.env.CODER_ADMIN_TOKEN_FILE = tokenFile;
+
+  t.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousCoderUrl == null) {
+      delete process.env.CODER_URL;
+    } else {
+      process.env.CODER_URL = previousCoderUrl;
+    }
+    if (previousTokenFile == null) {
+      delete process.env.CODER_ADMIN_TOKEN_FILE;
+    } else {
+      process.env.CODER_ADMIN_TOKEN_FILE = previousTokenFile;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const seenRequests: Array<{ method: string; url: string; body: string | undefined }> = [];
+
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+    const method = init?.method || 'GET';
+    const body = typeof init?.body === 'string' ? init.body : undefined;
+    seenRequests.push({ method, url, body });
+
+    if (url === 'http://coder.test/api/v2/workspaces/ws-1/builds' && method === 'POST') {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    throw new Error(`Unexpected fetch ${method} ${url}`);
+  };
+
+  const moduleUrl = new URL(`../lib/coder.ts?case=${Date.now()}-transitions`, import.meta.url);
+  const { startWorkspace, stopWorkspace } = await import(moduleUrl.href);
+
+  await startWorkspace('ws-1');
+  await stopWorkspace('ws-1');
+
+  assert.deepEqual(seenRequests, [
+    {
+      method: 'POST',
+      url: 'http://coder.test/api/v2/workspaces/ws-1/builds',
+      body: JSON.stringify({ transition: 'start', orphan: false }),
+    },
+    {
+      method: 'POST',
+      url: 'http://coder.test/api/v2/workspaces/ws-1/builds',
+      body: JSON.stringify({ transition: 'stop', orphan: false }),
+    },
+  ]);
+});

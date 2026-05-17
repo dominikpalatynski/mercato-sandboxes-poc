@@ -70,15 +70,34 @@ export async function GET(
   let newTerminal = sandbox.terminal_url;
   let newApp = sandbox.app_url;
   let newSplash = sandbox.splash_url;
+  const hasPublishedLinks = Boolean(
+    sandbox.vscode_url || sandbox.terminal_url || sandbox.app_url || sandbox.splash_url,
+  );
 
   const lifecycleReady =
     cs.lifecycleState === 'ready' ||
     cs.lifecycleState === 'start_timeout' ||
     cs.lifecycleState === 'start_error';
 
-  if (cs.jobStatus === 'failed' || cs.jobStatus === 'canceled') {
-    newStatus = 'failed';
-    newMessage = `Coder build ${cs.jobStatus}`;
+  if (cs.transition === 'stop') {
+    if (cs.jobStatus === 'succeeded') {
+      newStatus = 'stopped';
+      newMessage = 'Workspace paused';
+    } else if (cs.jobStatus === 'failed' || cs.jobStatus === 'canceled') {
+      newStatus = 'ready';
+      newMessage = `Workspace stop ${cs.jobStatus}; workspace still running`;
+    } else {
+      newStatus = 'building';
+      newMessage = 'Stopping workspace…';
+    }
+  } else if (cs.jobStatus === 'failed' || cs.jobStatus === 'canceled') {
+    if (cs.transition === 'start' && hasPublishedLinks) {
+      newStatus = 'stopped';
+      newMessage = `Workspace failed to resume (${cs.jobStatus})`;
+    } else {
+      newStatus = 'failed';
+      newMessage = `Coder build ${cs.jobStatus}`;
+    }
   } else if (cs.jobStatus === 'succeeded' && lifecycleReady) {
     newStatus = 'ready';
     newMessage =

@@ -89,6 +89,14 @@ One Coder workspace provisions:
 - one private Docker network for workspace-to-Postgres traffic
 - attachment to the shared `mercato-proxy` network so the agent can reach Coder
 
+The onboarding app supports a minimal manual pause/resume flow for existing
+workspaces:
+
+- `pause` stops the running Coder workspace compute
+- `resume` starts the same Coder workspace again
+- the existing workspace identity and persistent storage must be reused
+- the sandbox UI exposes this flow from the sandbox detail page
+
 Workspace ports are exposed through Coder's native wildcard access URL:
 
 | Surface | URL shape |
@@ -129,6 +137,9 @@ transport through reverse proxies.
 10. `k8s/` provides an additive local Kubernetes workflow that keeps the same
     onboarding contract and exposes onboarding, Coder, and wildcard apps
     through ingress on `:8443` via `kubectl port-forward`.
+11. A ready sandbox can be paused from the sandbox detail page and later
+    resumed without creating a new Coder workspace or reinitializing its
+    persistent storage.
 
 ## Production Notes
 

@@ -198,7 +198,7 @@ export default function BuildMicrosteps({
 }: BuildMicrostepsProps): React.ReactElement | null {
   // Hide entirely when the workspace is live — the stats strip carries the
   // visual weight then.
-  if (status === 'ready') return null;
+  if (status === 'ready' || status === 'stopped') return null;
 
   if (status === 'failed') {
     const content = (

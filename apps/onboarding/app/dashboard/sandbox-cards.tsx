@@ -126,7 +126,7 @@ export default function SandboxCards({ initial }: Props): React.ReactElement {
                   // to show (i.e. the workspace isn't terminal & we have at
                   // least one structured field). The component itself returns
                   // null on `ready`, and renders an inline error on `failed`.
-                  if (s.status === 'ready') return null;
+                  if (s.status === 'ready' || s.status === 'stopped') return null;
                   return (
                     <BuildMicrosteps
                       status={s.status}

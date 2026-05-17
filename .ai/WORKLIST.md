@@ -35,6 +35,12 @@ Working surfaces:
   sandbox entitlement guard. Both Coder templates now bootstrap Codex +
   Claude from non-secret OpenRouter settings plus per-user secrets instead of
   shared template API keys.
+- Added a minimal manual pause/resume flow in onboarding:
+  - sandbox detail pages can pause a ready workspace and resume a stopped one
+  - the same `coder_workspace_id` is reused for resume instead of creating a
+    new workspace
+  - status polling now maps Coder stop transitions to the existing `stopped`
+    status so paused workspaces stop rendering provisioning progress
 
 ## Remaining Follow-Up
 

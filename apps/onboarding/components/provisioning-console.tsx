@@ -286,11 +286,11 @@ export default function ProvisioningConsole({
   const stoppedRef = useRef(false);
   const autoSwitchedRef = useRef(false);
 
-  const polling = status !== 'ready' && status !== 'failed';
+  const polling = status !== 'ready' && status !== 'failed' && status !== 'stopped';
 
   useEffect(() => {
     stoppedRef.current = false;
-    if (status === 'ready') return; // No need to stream once ready.
+    if (status === 'ready' || status === 'stopped') return; // No need to stream once the workspace is terminal.
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     async function tick(): Promise<void> {
@@ -316,7 +316,7 @@ export default function ProvisioningConsole({
       } catch {
         /* ignore */
       }
-      if (!stoppedRef.current && status !== 'ready')
+      if (!stoppedRef.current && status !== 'ready' && status !== 'stopped')
         timer = setTimeout(tick, intervalMs);
     }
     void tick();

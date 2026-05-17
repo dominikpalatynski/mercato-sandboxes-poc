@@ -13,7 +13,10 @@ import {
   Info,
   KeyRound,
   Loader,
+  Loader2,
   LayoutDashboard,
+  Pause,
+  Play,
   Terminal,
   type LucideIcon,
 } from 'lucide-react';
@@ -56,6 +59,10 @@ const POLL_INTERVAL_MS = 3_000;
 const CODER_PUBLIC_URL =
   (process.env.NEXT_PUBLIC_CODER_URL || 'https://coder.sandbox.lvh.me').replace(/\/$/, '');
 
+function isTerminalStatus(status: string): boolean {
+  return status === 'ready' || status === 'failed' || status === 'stopped';
+}
+
 interface LinkSpec {
   label: string;
   subtitle: string;
@@ -78,6 +85,8 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
   const [sandbox, setSandbox] = useState<SandboxView>(initial);
   const [copyState, setCopyState] = useState<'idle' | 'id' | 'email' | 'password'>('idle');
   const [deleting, setDeleting] = useState(false);
+  const [actioning, setActioning] = useState<'pause' | 'resume' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [credsDismissed, setCredsDismissed] = useState<boolean>(false);
   const [credsOpen, setCredsOpen] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -113,43 +122,54 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
     [initial.id],
   );
 
+  const refreshStatus = useCallback(async (): Promise<SandboxView | null> => {
+    try {
+      const res = await fetch(`/api/sandboxes/${initial.id}/status`, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const data = (await res.json()) as SandboxView;
+      // The status API doesn't echo coder_owner_name / coder_workspace_name —
+      // preserve those from the initial server-rendered props.
+      setSandbox((prev) => ({
+        ...data,
+        coder_owner_name: prev.coder_owner_name ?? data.coder_owner_name ?? null,
+        coder_workspace_name: prev.coder_workspace_name ?? data.coder_workspace_name ?? null,
+      }));
+      return data;
+    } catch {
+      return null;
+    }
+  }, [initial.id]);
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    stoppedRef.current = false;
 
     async function tick() {
       if (stoppedRef.current) return;
-      try {
-        const res = await fetch(`/api/sandboxes/${initial.id}/status`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = (await res.json()) as SandboxView;
-          // The status API doesn't echo coder_owner_name / coder_workspace_name —
-          // preserve those from the initial server-rendered props.
-          setSandbox((prev) => ({
-            ...data,
-            coder_owner_name: prev.coder_owner_name ?? data.coder_owner_name ?? null,
-            coder_workspace_name: prev.coder_workspace_name ?? data.coder_workspace_name ?? null,
-          }));
-          if (data.status === 'ready' || data.status === 'failed') {
-            stoppedRef.current = true;
-            return;
-          }
-        }
-      } catch {
-        /* swallow; will retry */
+      const data = await refreshStatus();
+      if (data && isTerminalStatus(data.status)) {
+        stoppedRef.current = true;
+        return;
       }
       timer = setTimeout(tick, POLL_INTERVAL_MS);
     }
 
-    if (initial.status === 'failed') {
+    if (sandbox.status === 'failed' || sandbox.status === 'stopped') {
       stoppedRef.current = true;
     } else {
-      timer = setTimeout(tick, initial.status === 'ready' ? 0 : POLL_INTERVAL_MS);
+      timer = setTimeout(tick, sandbox.status === 'ready' ? 0 : POLL_INTERVAL_MS);
     }
     return () => {
       stoppedRef.current = true;
       if (timer) clearTimeout(timer);
     };
-  }, [initial.id, initial.status]);
+  }, [initial.id, refreshStatus, sandbox.status]);
+
+  useEffect(() => {
+    if (isTerminalStatus(sandbox.status)) {
+      setActioning(null);
+    }
+  }, [sandbox.status]);
 
   const copyToClipboard = useCallback(
     async (value: string, kind: 'id' | 'email' | 'password') => {
@@ -182,6 +202,31 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
     }
   }, [initial.id, router]);
 
+  const runWorkspaceAction = useCallback(
+    async (action: 'pause' | 'resume') => {
+      setActioning(action);
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/sandboxes/${initial.id}/${action}`, { method: 'POST' });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          setActionError(body.error || `${action} failed (${res.status})`);
+          setActioning(null);
+          return;
+        }
+        setSandbox((prev) => ({
+          ...prev,
+          status: 'building',
+          status_message: action === 'pause' ? 'Stopping workspace…' : 'Starting workspace…',
+        }));
+      } catch (e) {
+        setActionError(String(e).slice(0, 200));
+        setActioning(null);
+      }
+    },
+    [initial.id],
+  );
+
   const dashboardUrl = useMemo(() => {
     if (!sandbox.coder_owner_name || !sandbox.coder_workspace_name) return null;
     return `${CODER_PUBLIC_URL}/@${sandbox.coder_owner_name}/${sandbox.coder_workspace_name}`;
@@ -200,6 +245,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
   ];
 
   const truncatedId = `${initial.id.slice(0, 8)}…${initial.id.slice(-4)}`;
+  const isWorkspaceActionPending = actioning !== null && sandbox.status === 'building';
 
   return (
     <div className="space-y-8">
@@ -224,8 +270,45 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={sandbox.status} />
+          {sandbox.status === 'ready' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void runWorkspaceAction('pause')}
+              disabled={actioning !== null}
+            >
+              {actioning === 'pause' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Pause className="h-4 w-4" />
+              )}
+              Pause
+            </Button>
+          )}
+          {sandbox.status === 'stopped' && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void runWorkspaceAction('resume')}
+              disabled={actioning !== null}
+            >
+              {actioning === 'resume' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              Resume
+            </Button>
+          )}
         </div>
       </div>
+
+      {actionError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          {actionError}
+        </div>
+      )}
 
       {/* Ready state */}
       {sandbox.status === 'ready' && (
@@ -387,6 +470,58 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
         </>
       )}
 
+      {sandbox.status === 'stopped' && (
+        <Card className="border-border/80 bg-card/90">
+          <div className="flex flex-row items-center gap-2 p-6 pb-3">
+            <Pause className="h-5 w-5 text-foreground/80" />
+            <h2 className="text-base font-semibold leading-none">
+              Workspace paused
+            </h2>
+          </div>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-foreground">
+              {sandbox.status_message || 'The workspace compute is stopped, but its files and database are kept.'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Resume starts the same Coder workspace again and reuses its existing storage.
+            </p>
+            <div>
+              <Button
+                type="button"
+                onClick={() => void runWorkspaceAction('resume')}
+                disabled={actioning !== null}
+              >
+                {actioning === 'resume' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                Resume workspace
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isWorkspaceActionPending && (
+        <Card className="border-border/80 bg-card/90">
+          <div className="flex flex-row items-center gap-2 p-6 pb-3">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <h2 className="text-base font-semibold leading-none">
+              {actioning === 'pause' ? 'Pausing workspace' : 'Starting workspace'}
+            </h2>
+          </div>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-foreground">
+              {sandbox.status_message || (actioning === 'pause' ? 'Stopping workspace…' : 'Starting workspace…')}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              This can take a few seconds while Coder applies the workspace transition.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Failed state — keep the streaming console visible (logs explain WHY it failed) */}
       {sandbox.status === 'failed' && (
         <>
@@ -423,7 +558,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
       )}
 
       {/* Building / pending state — full provisioning console */}
-      {sandbox.status !== 'ready' && sandbox.status !== 'failed' && (
+      {sandbox.status !== 'ready' && sandbox.status !== 'failed' && sandbox.status !== 'stopped' && !isWorkspaceActionPending && (
         <ProvisioningConsole
           sandboxId={initial.id}
           status={sandbox.status}
