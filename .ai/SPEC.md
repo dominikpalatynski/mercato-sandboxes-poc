@@ -67,6 +67,23 @@ The local Kubernetes URLs are:
 - `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
 - `https://4000--main--<workspace>--<user>.apps.sandbox.lvh.me:8443`
 
+## Additive Hetzner OpenTofu Path
+
+An additive Hetzner Cloud bootstrap path lives under `infra/terraform`.
+
+That OpenTofu root provisions only the infrastructure needed for a minimal k3s
+sandbox cluster:
+
+- one private Hetzner network and subnet
+- one firewall
+- one SSH key upload
+- one control-plane server: `master-01`
+- one or more sandbox worker servers, defaulting to `worker-sandbox-01`
+
+k3s installation, worker join, and sandbox node labels/taints are intentionally
+kept outside Terraform and are handled manually or via the helper scripts under
+`infra/terraform/scripts/`.
+
 In this mode, each workspace is provisioned as one Kubernetes `Deployment`
 containing:
 

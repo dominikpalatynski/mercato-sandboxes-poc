@@ -29,6 +29,11 @@ Working surfaces:
 - Moved specs and handoff docs into `.ai/` and added `AGENTS.md`.
 - Added an additive Kubernetes local path under `k8s/` with dedicated manifests,
   scripts, Helm values, and a separate Kubernetes-specific Coder template.
+- Added an additive Hetzner/OpenTofu infrastructure bootstrap under
+  `infra/terraform` for a minimal k3s topology with a private network/subnet,
+  firewall, SSH key, one control-plane VPS, one or more sandbox worker VPSs,
+  and helper scripts for explicit k3s install, worker join, and sandbox
+  labels/taints outside Terraform.
 - Implemented OpenRouter billing and key provisioning in `apps/onboarding`,
   including billing tables, PayByLink checkout/webhook routes, OpenRouter key
   orchestration, per-user Coder secret sync, dashboard billing summary, and a
@@ -141,6 +146,10 @@ Working surfaces:
   - note the current local verification already covers automated tests plus
     `next build` through compile/type/static generation; the final standalone
     trace copy is blocked locally by `ENOSPC`
+- Run the first real Hetzner bootstrap from `infra/terraform`:
+  verify `tofu apply` against a real Hetzner project, then verify manual k3s
+  install on `master-01`, worker join on `worker-sandbox-01`, kubeconfig
+  export, worker labels, and optional taints on the live cluster.
 - Implement GitHub account sync and workspace bootstrap per
   `.ai/SPEC-GITHUB-WORKSPACE-BOOTSTRAP.md`:
   - add encrypted GitHub account storage in `apps/onboarding/db/schema.sql`
