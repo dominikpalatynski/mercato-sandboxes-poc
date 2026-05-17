@@ -4,18 +4,27 @@ import { ArrowLeft } from 'lucide-react';
 import { requireSession } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import NewSandboxForm from './form';
+import {
+  DEFAULT_SANDBOX_PRESET,
+  listCreatableSandboxPresets,
+} from '@/lib/sandbox-presets';
 
 export default async function NewSandboxPage() {
   await requireSession();
+  const creatablePresets = listCreatableSandboxPresets();
+
   return (
-    <div className="mx-auto flex max-w-md flex-col gap-4 py-6">
+    <div className="mx-auto flex max-w-4xl flex-col gap-4 py-6">
       <Button variant="ghost" size="sm" asChild className="self-start">
         <Link href="/dashboard">
           <ArrowLeft className="h-4 w-4" />
           Back to dashboard
         </Link>
       </Button>
-      <NewSandboxForm />
+      <NewSandboxForm
+        creatablePresets={creatablePresets}
+        defaultPresetId={DEFAULT_SANDBOX_PRESET}
+      />
     </div>
   );
 }

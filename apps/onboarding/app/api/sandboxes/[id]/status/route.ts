@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { buildLinks, coderPublicUrl, getWorkspaceStatus, resolveAppUrl } from '@/lib/coder';
+import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
 interface SandboxRow {
   id: string;
   user_id: string;
   name: string;
+  preset_id: SandboxPresetId;
   coder_workspace_id: string | null;
   status: string;
   status_message: string | null;
@@ -32,7 +34,7 @@ export async function GET(
   const { id } = await ctx.params;
 
   const result = await query<SandboxRow>(
-    `select id, user_id, name, coder_workspace_id, status, status_message,
+    `select id, user_id, name, preset_id, coder_workspace_id, status, status_message,
             vscode_url, terminal_url, app_url, splash_url, created_at, updated_at
        from sandboxes
       where id = $1 and user_id = $2`,
@@ -104,7 +106,9 @@ export async function GET(
       cs.lifecycleState === 'ready'
         ? 'Workspace ready'
         : `Workspace usable (lifecycle: ${cs.lifecycleState})`;
-    // App, splash, and VS Code all come from Coder's external app URLs.
+    // App, splash, and VS Code all come from Coder app metadata.
+    // For subdomain apps we derive the browser-facing host from Coder's
+    // published subdomain name while preserving any path/query from the app URL.
     // Terminal stays path-based on the main Coder origin.
     newVscode =
       resolveAppUrl({ apps: cs.apps, slug: 'code-server', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
@@ -131,7 +135,7 @@ export async function GET(
             splash_url = $6,
             updated_at = now()
       where id = $7
-      returning id, user_id, name, coder_workspace_id, status, status_message,
+      returning id, user_id, name, preset_id, coder_workspace_id, status, status_message,
                 vscode_url, terminal_url, app_url, splash_url, created_at, updated_at`,
     [newStatus, newMessage, newVscode, newTerminal, newApp, newSplash, sandbox.id],
   );

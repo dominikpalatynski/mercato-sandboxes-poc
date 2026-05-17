@@ -90,17 +90,51 @@ data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
 locals {
-  ws_name       = lower(data.coder_workspace.me.name)
-  owner_name    = lower(data.coder_workspace_owner.me.name)
-  id_suffix     = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
-  name_prefix   = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
-  deployment    = "${local.name_prefix}-${local.id_suffix}"
-  home_pvc      = "coder-home-${local.id_suffix}"
-  pg_pvc        = "coder-pg-${local.id_suffix}"
-  code_url      = "${var.proxy_scheme}://13337--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
-  app_url       = "${var.proxy_scheme}://3000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
-  splash_url    = "${var.proxy_scheme}://4000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
-  public_coder  = trimsuffix(var.coder_public_url, "/")
+  sandbox_preset_options = {
+    crm = {
+      display_name      = "CRM Open Mercato"
+      bootstrap_command = "npx -y create-mercato-app app --preset crm --skip-agentic-setup"
+    }
+    empty = {
+      display_name      = "Empty Open Mercato"
+      bootstrap_command = "npx -y create-mercato-app app --preset empty --skip-agentic-setup"
+    }
+    classic = {
+      display_name      = "Classic Open Mercato"
+      bootstrap_command = "npx -y create-mercato-app app --preset classic --skip-agentic-setup"
+    }
+  }
+  default_sandbox_preset = "crm"
+}
+
+data "coder_parameter" "sandbox_preset" {
+  name         = "sandbox_preset"
+  display_name = "Sandbox preset"
+  description  = "Choose which Open Mercato starter should be bootstrapped on first workspace start."
+  type         = "string"
+  mutable      = false
+  default      = local.default_sandbox_preset
+  order        = 1
+
+  dynamic "option" {
+    for_each = local.sandbox_preset_options
+    content {
+      name  = option.value.display_name
+      value = option.key
+    }
+  }
+}
+
+locals {
+  ws_name        = lower(data.coder_workspace.me.name)
+  owner_name     = lower(data.coder_workspace_owner.me.name)
+  id_suffix      = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
+  name_prefix    = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
+  deployment     = "${local.name_prefix}-${local.id_suffix}"
+  home_pvc       = "coder-home-${local.id_suffix}"
+  pg_pvc         = "coder-pg-${local.id_suffix}"
+  app_url        = "${var.proxy_scheme}://3000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
+  public_coder   = trimsuffix(var.coder_public_url, "/")
   internal_coder = trimsuffix(var.agent_coder_url, "/")
   selector_labels = {
     "app.kubernetes.io/name" = "mercato-workspace"
@@ -111,7 +145,15 @@ locals {
     "coder.workspace_name"      = local.ws_name
     "coder.owner"               = local.owner_name
   })
-  agent_init_script = replace(coder_agent.main.init_script, local.public_coder, local.internal_coder)
+  selected_sandbox_preset = local.sandbox_preset_options[data.coder_parameter.sandbox_preset.value]
+  agent_init_script       = replace(coder_agent.main.init_script, local.public_coder, local.internal_coder)
+  workspace_startup_script = templatefile("${path.module}/files/workspace-startup.sh.tftpl", {
+    sandbox_preset      = data.coder_parameter.sandbox_preset.value
+    sandbox_preset_name = local.selected_sandbox_preset.display_name
+    bootstrap_command   = local.selected_sandbox_preset.bootstrap_command
+    app_url             = local.app_url
+    database_host       = "127.0.0.1"
+  })
 }
 
 resource "coder_agent" "main" {
@@ -126,126 +168,7 @@ resource "coder_agent" "main" {
     GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
   }
 
-  startup_script = <<-EOT
-    set -e
-
-    code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
-
-    mkdir -p "$HOME/.codex"
-    if [ ! -f "$HOME/.codex/config.toml" ] || grep -q "open-mercato managed openrouter profile" "$HOME/.codex/config.toml"; then
-      cat > "$HOME/.codex/config.toml" <<'EOF'
-# open-mercato managed openrouter profile
-model = "openai/gpt-5"
-model_provider = "openrouter"
-
-[model_providers.openrouter]
-name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
-wire_api = "responses"
-EOF
-    fi
-
-    if [ ! -d "$HOME/app" ]; then
-      cd "$HOME"
-      npx -y create-mercato-app app --preset crm --skip-agentic-setup
-      cd app
-      cp .env.example .env
-      sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgres://mercato:mercato@127.0.0.1:5432/mercato#" .env
-      grep -q '^OM_DEV_AUTO_OPEN=' .env || echo "OM_DEV_AUTO_OPEN=0" >> .env
-      grep -q '^OM_DEV_SPLASH_PORT=' .env || echo "OM_DEV_SPLASH_PORT=4000" >> .env
-      sed -i "s#^APP_URL=.*#APP_URL=${local.app_url}#" .env || true
-      grep -q '^APP_URL=' .env || echo "APP_URL=${local.app_url}" >> .env
-      sed -i "s#^NEXT_PUBLIC_APP_URL=.*#NEXT_PUBLIC_APP_URL=${local.app_url}#" .env || true
-      grep -q '^NEXT_PUBLIC_APP_URL=' .env || echo "NEXT_PUBLIC_APP_URL=${local.app_url}" >> .env
-      sed -i "s#^APP_ALLOWED_ORIGINS=.*#APP_ALLOWED_ORIGINS=${local.app_url}#" .env || true
-      grep -q '^APP_ALLOWED_ORIGINS=' .env || echo "APP_ALLOWED_ORIGINS=${local.app_url}" >> .env
-      yarn install
-      yarn mercato agentic:init >/tmp/mercato-agentic-init.log 2>&1 || true
-    fi
-
-    cd "$HOME/app"
-    if grep -q "const allowedDevOrigins = isDevelopment ? resolveAllowedDevOrigins() : \\[\\]" next.config.ts 2>/dev/null; then
-      perl -0pi -e "s/const allowedDevOrigins = isDevelopment \\? resolveAllowedDevOrigins\\(\\) : \\[\\]/const allowedDevOrigins = resolveAllowedDevOrigins()/g" next.config.ts
-    fi
-
-    if grep -q "const localMatch = line.match(/^- Local:\\\\s*(.+)$/)" scripts/dev-runtime.mjs 2>/dev/null \
-      && ! grep -q "resolveDisplayedRuntimeBaseUrl" scripts/dev-runtime.mjs 2>/dev/null; then
-node <<'NODE'
-const fs = require('fs')
-const runtimePath = 'scripts/dev-runtime.mjs'
-let source = fs.readFileSync(runtimePath, 'utf8')
-
-const helperMarker = `function readNonEmptyEnvValue(key) {
-  const value = process.env[key]
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}`
-
-if (!source.includes(helperMarker)) {
-  console.warn('[sandbox] unable to patch splash display URL: helper marker not found')
-  process.exit(0)
-}
-
-const helperReplacement = helperMarker + `
-
-function normalizeRuntimeBaseUrl(value) {
-  if (typeof value !== 'string' || value.trim().length === 0) return null
-
-  try {
-    const parsed = new URL(value)
-    parsed.pathname = ''
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\\/$/, '')
-  } catch {
-    return null
-  }
-}
-
-function resolveDisplayedRuntimeBaseUrl(localUrl) {
-  return normalizeRuntimeBaseUrl(process.env.APP_URL)
-    ?? normalizeRuntimeBaseUrl(process.env.NEXT_PUBLIC_APP_URL)
-    ?? normalizeRuntimeBaseUrl(localUrl)
-}`
-source = source.replace(helperMarker, helperReplacement)
-
-const localStartNeedle = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)`
-const localStart = source.indexOf(localStartNeedle)
-const readyStart = source.indexOf('  const readyMatch = line.match', localStart)
-if (localStart === -1 || readyStart === -1) {
-  console.warn('[sandbox] unable to patch splash display URL: local URL block not found')
-  process.exit(0)
-}
-
-const localReplacement = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)
-  if (localMatch) {
-    const displayedUrl = resolveDisplayedRuntimeBaseUrl(localMatch[1]) ?? localMatch[1]
-    return {
-      type: 'status',
-      message: '🌐 App runtime at ' + displayedUrl,
-      splashPhase: startupSplashPhase,
-      splashDetail: 'Dev server is listening at ' + displayedUrl,
-      readyUrl: displayedUrl,
-      loginUrl: displayedUrl.replace(/\/$/, '') + '/login',
-      activity: 'App runtime at ' + displayedUrl,
-      progressCurrent: 4,
-      progressLabel: 'Precompiling login page',
-    }
-  }
-`
-
-source = source.slice(0, localStart) + localReplacement + source.slice(readyStart)
-fs.writeFileSync(runtimePath, source)
-NODE
-    fi
-
-    export APP_URL="${local.app_url}"
-    export NEXT_PUBLIC_APP_URL="${local.app_url}"
-    export APP_ALLOWED_ORIGINS="${local.app_url}"
-    nohup env APP_URL="${local.app_url}" NEXT_PUBLIC_APP_URL="${local.app_url}" APP_ALLOWED_ORIGINS="${local.app_url}" yarn setup >/tmp/mercato-dev.log 2>&1 &
-  EOT
+  startup_script = local.workspace_startup_script
 
   metadata {
     display_name = "CPU Usage"
@@ -276,9 +199,10 @@ resource "coder_app" "code_server" {
   agent_id     = coder_agent.main.id
   slug         = "code-server"
   display_name = "VS Code"
-  external     = true
-  url          = "${local.code_url}/?folder=/home/coder/app"
+  url          = "http://localhost:13337/?folder=/home/coder/app"
   icon         = "/icon/code.svg"
+  subdomain    = true
+  share        = "owner"
   open_in      = "tab"
 }
 
@@ -286,9 +210,10 @@ resource "coder_app" "splash" {
   agent_id     = coder_agent.main.id
   slug         = "splash"
   display_name = "Mercato Splash"
-  external     = true
-  url          = local.splash_url
+  url          = "http://localhost:4000"
   icon         = "/icon/widgets.svg"
+  subdomain    = true
+  share        = "owner"
   open_in      = "tab"
 }
 
@@ -296,9 +221,10 @@ resource "coder_app" "app" {
   agent_id     = coder_agent.main.id
   slug         = "app"
   display_name = "Mercato App"
-  external     = true
-  url          = local.app_url
+  url          = "http://localhost:3000"
   icon         = "/icon/widgets.svg"
+  subdomain    = true
+  share        = "owner"
   open_in      = "tab"
 }
 

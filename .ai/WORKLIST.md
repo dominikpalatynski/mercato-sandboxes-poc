@@ -41,6 +41,23 @@ Working surfaces:
     new workspace
   - status polling now maps Coder stop transitions to the existing `stopped`
     status so paused workspaces stop rendering provisioning progress
+  - workspace startup now reruns `yarn dev` on resume instead of replaying
+    first-boot `yarn setup`
+- Switched the Kubernetes Coder template from manually composed external app
+  URLs to Coder-managed subdomain apps with `share = "owner"`, and updated
+  onboarding to consume `subdomain_name` plus the proxied app path/query for
+  those apps while preserving the local `:8443` port-forward scheme/port
+  normalization and appending `WILDCARD_APPS_DOMAIN` when Coder returns only a
+  bare subdomain label.
+- Standardized sandbox preset selection across onboarding and both Coder
+  templates:
+  - onboarding now stores `preset_id` and sends `sandbox_preset` as a Coder
+    rich parameter during workspace creation
+  - both templates expose the same `crm`, `empty`, and `classic` Open Mercato
+    variants from one template instead of hardcoding a single bootstrap path
+  - the workspace bootstrap logic now lives in dedicated
+    `files/workspace-startup.sh.tftpl` files instead of inline Terraform
+    heredocs
 
 ## Remaining Follow-Up
 
@@ -75,6 +92,11 @@ Working surfaces:
     `create-mercato-app` if it is not already a repo.
   - Make interactive shells start in `/home/coder/app` by default so users land
     directly in the app folder.
+- Implement the planned bare shell preset end-to-end:
+  - decide how onboarding should render non-Mercato links and labels
+  - expose at least ports `3000` and `8080` through Coder apps
+  - add a first-boot bootstrap path that does not assume `/home/coder/app` is
+    an Open Mercato project
 - Create a security-hardening spec for the whole onboarding app and sandbox
   runtime:
   - Review personal-data handling and decide whether database fields containing

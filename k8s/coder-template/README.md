@@ -15,7 +15,14 @@ workspace UX the same while replacing Docker resources with Kubernetes ones.
 
 - Coder agent bootstrap is rewritten from the browser-facing public URL to the
   in-cluster Coder service URL.
-- The Mercato app still runs `yarn setup`, exposes the same ports, and writes
-  the same public app URLs into `.env`.
+- One Kubernetes Coder template now exposes a `sandbox_preset` parameter with
+  the active Open Mercato variants `crm`, `empty`, and `classic`.
+- The workspace startup logic lives in
+  `k8s/coder-template/files/workspace-startup.sh.tftpl` instead of an inline
+  Terraform heredoc, so preset bootstrap commands and first-boot behavior stay
+  readable.
+- The Mercato app runs `yarn setup` on first boot, then `yarn dev` on later
+  start/resume cycles, while still exposing the same ports and writing the same
+  public app URLs into `.env`.
 - PVCs are kept outside the `start_count` gate so workspace stop/start cycles
   preserve home and database state.

@@ -1,11 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import type { CreatableSandboxPresetId } from './sandbox-presets';
 
 const CODER_URL = (process.env.CODER_URL || 'http://coder').replace(/\/$/, '');
 const CODER_PUBLIC_URL = (process.env.CODER_PUBLIC_URL || 'https://coder.sandbox.lvh.me').replace(/\/$/, '');
 const WILDCARD_APPS_DOMAIN = process.env.WILDCARD_APPS_DOMAIN || 'apps.sandbox.lvh.me';
-const CODER_ADMIN_TOKEN_FILE = process.env.CODER_ADMIN_TOKEN_FILE || '/run/secrets/coder-admin-token';
-const CODER_TEMPLATE_ID_FILE = process.env.CODER_TEMPLATE_ID_FILE || '/run/secrets/coder-template-id';
+const SANDBOX_PRESET_PARAMETER_NAME = 'sandbox_preset';
+
+function adminTokenFile(): string {
+  return process.env.CODER_ADMIN_TOKEN_FILE || '/run/secrets/coder-admin-token';
+}
+
+function templateIdFile(): string {
+  return process.env.CODER_TEMPLATE_ID_FILE || '/run/secrets/coder-template-id';
+}
 
 function readTrim(path: string, label: string): string {
   try {
@@ -23,11 +31,11 @@ function readTrim(path: string, label: string): string {
 let _adminToken: string | null = null;
 let _templateId: string | null = null;
 function adminToken(): string {
-  if (_adminToken === null) _adminToken = readTrim(CODER_ADMIN_TOKEN_FILE, 'Coder admin token');
+  if (_adminToken === null) _adminToken = readTrim(adminTokenFile(), 'Coder admin token');
   return _adminToken;
 }
 function templateId(): string {
-  if (_templateId === null) _templateId = readTrim(CODER_TEMPLATE_ID_FILE, 'Coder template id');
+  if (_templateId === null) _templateId = readTrim(templateIdFile(), 'Coder template id');
   return _templateId;
 }
 
@@ -48,6 +56,8 @@ export interface WorkspaceApp {
   display_name: string;
   url: string;
   external: boolean;
+  subdomain: boolean;
+  subdomain_name: string | null;
 }
 
 export interface CoderWorkspaceStatus {
@@ -288,12 +298,25 @@ export async function upsertUserSecret(user: string, input: UserSecretInput): Pr
   });
 }
 
-export async function createWorkspace(coderUserId: string, name: string): Promise<CoderWorkspaceRef> {
+interface CreateWorkspaceOptions {
+  sandboxPreset: CreatableSandboxPresetId;
+}
+
+export async function createWorkspace(
+  coderUserId: string,
+  name: string,
+  options: CreateWorkspaceOptions,
+): Promise<CoderWorkspaceRef> {
   const orgId = await getOrgId();
   const body = {
     name,
     template_id: templateId(),
-    rich_parameter_values: [],
+    rich_parameter_values: [
+      {
+        name: SANDBOX_PRESET_PARAMETER_NAME,
+        value: options.sandboxPreset,
+      },
+    ],
     automatic_updates: 'never',
   };
   const created = await coderFetch<{ id: string }>(
@@ -308,6 +331,8 @@ interface RawWorkspaceApp {
   display_name: string;
   url?: string;
   external?: boolean;
+  subdomain?: boolean;
+  subdomain_name?: string;
 }
 
 interface RawAgentMetadataItem {
@@ -356,6 +381,10 @@ export async function getWorkspaceStatus(id: string): Promise<CoderWorkspaceStat
     display_name: a.display_name,
     url: a.url ?? '',
     external: a.external === true,
+    subdomain: a.subdomain === true,
+    subdomain_name: typeof a.subdomain_name === 'string' && a.subdomain_name.length > 0
+      ? a.subdomain_name
+      : null,
   }));
   return {
     jobStatus: ws.latest_build.job.status,
@@ -493,8 +522,10 @@ async function enqueueWorkspaceTransition(
 
 /**
  * Resolve the user-facing URL for a given app slug from a workspace's apps list.
- * - external apps: use the upstream `url` directly (e.g. http://localhost:30123).
- * - non-external apps: build the path-based proxy URL via Coder.
+ * - external apps: use the upstream `url` directly.
+ * - subdomain apps: build a public URL from Coder's `subdomain_name` and keep
+ *   any path/query fragment from the proxied `url`.
+ * - path apps: build the path-based proxy URL via Coder.
  * Returns null if the slug is missing entirely.
  */
 export function resolveAppUrl(args: {
@@ -506,9 +537,57 @@ export function resolveAppUrl(args: {
 }): string | null {
   const app = args.apps.find((a) => a.slug === args.slug);
   if (!app) return null;
-  if (app.external && app.url) return normalizeToPublicScheme(app.url, args.coderPublicUrl);
+  if (app.subdomain && app.subdomain_name) {
+    return buildSubdomainAppUrl(app.subdomain_name, app.url, args.coderPublicUrl);
+  }
+  if (app.external && app.url) {
+    return normalizeToPublicScheme(app.url, args.coderPublicUrl);
+  }
   const base = `${args.coderPublicUrl.replace(/\/$/, '')}/@${args.ownerName}/${args.name}`;
   return `${base}/apps/${args.slug}`;
+}
+
+function buildSubdomainAppUrl(
+  subdomainName: string,
+  sourceUrl: string,
+  coderPublicUrl: string,
+): string {
+  try {
+    const publicUrl = new URL(coderPublicUrl);
+    const normalizedHost = normalizeSubdomainHost(subdomainName);
+    const hostUrl = normalizedHost.includes('://')
+      ? new URL(normalizedHost)
+      : new URL(`${publicUrl.protocol}//${normalizedHost}`);
+    const source = new URL(sourceUrl);
+    const target = new URL(`${publicUrl.protocol}//${hostUrl.hostname}`);
+    target.port = publicUrl.port;
+    target.pathname = source.pathname || '/';
+    target.search = source.search;
+    target.hash = source.hash;
+    return target.toString();
+  } catch {
+    return normalizeToPublicScheme(sourceUrl, coderPublicUrl);
+  }
+}
+
+function normalizeSubdomainHost(subdomainName: string): string {
+  const trimmed = subdomainName.trim();
+  if (!trimmed) return trimmed;
+
+  if (trimmed.includes('://')) {
+    try {
+      const parsed = new URL(trimmed);
+      if (!parsed.hostname.includes('.')) {
+        parsed.hostname = `${parsed.hostname}.${WILDCARD_APPS_DOMAIN}`;
+      }
+      return parsed.toString();
+    } catch {
+      return trimmed;
+    }
+  }
+
+  if (trimmed.includes('.')) return trimmed;
+  return `${trimmed}.${WILDCARD_APPS_DOMAIN}`;
 }
 
 function normalizeToPublicScheme(url: string, coderPublicUrl: string): string {
@@ -517,8 +596,7 @@ function normalizeToPublicScheme(url: string, coderPublicUrl: string): string {
     const target = new URL(url);
     if (target.hostname === publicUrl.hostname || target.hostname.endsWith(`.${WILDCARD_APPS_DOMAIN}`)) {
       target.protocol = publicUrl.protocol;
-      if (target.protocol === 'https:' && target.port === '80') target.port = '';
-      if (target.protocol === 'http:' && target.port === '443') target.port = '';
+      target.port = publicUrl.port;
     }
     return target.toString();
   } catch {

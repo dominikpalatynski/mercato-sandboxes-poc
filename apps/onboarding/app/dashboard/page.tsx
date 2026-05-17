@@ -4,10 +4,12 @@ import { query } from '@/lib/db';
 import { getBillingSummaryForUser } from '@/lib/billing';
 import SandboxCards, { type DashboardSandbox } from './sandbox-cards';
 import BillingCard from './billing-card';
+import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
 interface SandboxRow {
   id: string;
   name: string;
+  preset_id: SandboxPresetId;
   status: string;
   status_message: string | null;
   created_at: Date;
@@ -19,7 +21,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const session = await requireSession();
   const billingSummary = await getBillingSummaryForUser(session.sub);
   const { rows } = await query<SandboxRow>(
-    `select id, name, status, status_message, created_at
+    `select id, name, preset_id, status, status_message, created_at
        from sandboxes
       where user_id = $1
       order by created_at desc`,
@@ -29,6 +31,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const initial: DashboardSandbox[] = rows.map((r) => ({
     id: r.id,
     name: r.name,
+    preset_id: r.preset_id,
     status: r.status,
     status_message: r.status_message,
     created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),

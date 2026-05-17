@@ -15,11 +15,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { formatRelative } from '@/lib/relative-time';
+import { getSandboxPreset, type SandboxPresetId } from '@/lib/sandbox-presets';
 import { cn } from '@/lib/utils';
 
 export interface DashboardSandbox {
   id: string;
   name: string;
+  preset_id: SandboxPresetId;
   status: string;
   status_message: string | null;
   created_at: string;
@@ -96,77 +98,85 @@ export default function SandboxCards({ initial }: Props): React.ReactElement {
       )}
       <ul className="space-y-3">
         {items.map((s) => (
-          <li
-            key={s.id}
-            className={cn(
-              'group relative flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition hover:border-primary/40 hover:shadow-card',
-              'sm:flex-row sm:items-center',
-            )}
-          >
-            {/* Computer icon */}
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <MonitorCog className="h-7 w-7" />
-            </span>
-
-            {/* Name + status + relative time */}
-            <div className="min-w-0 flex-1 space-y-1">
-              <Link
-                href={`/sandboxes/${s.id}`}
-                className="block truncate font-mono text-base font-semibold text-foreground hover:underline"
+          (() => {
+            const presetLabel = getSandboxPreset(s.preset_id)?.displayName ?? s.preset_id;
+            return (
+              <li
+                key={s.id}
+                className={cn(
+                  'group relative flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition hover:border-primary/40 hover:shadow-card',
+                  'sm:flex-row sm:items-center',
+                )}
               >
-                {s.name}
-              </Link>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <StatusBadge status={s.status} />
-                <span>created {formatRelative(s.created_at)}</span>
-                {/* Iconified micro-stepper replaces the raw `job=…, lifecycle=…` debug text. */}
-                {(() => {
-                  const parsed = parseStatusMessage(s.status_message);
-                  // Only render the microsteps when we have something meaningful
-                  // to show (i.e. the workspace isn't terminal & we have at
-                  // least one structured field). The component itself returns
-                  // null on `ready`, and renders an inline error on `failed`.
-                  if (s.status === 'ready' || s.status === 'stopped') return null;
-                  return (
-                    <BuildMicrosteps
-                      status={s.status}
-                      jobStatus={parsed.jobStatus}
-                      agentStatus={null}
-                      lifecycleState={parsed.lifecycleState}
-                    />
-                  );
-                })()}
-              </div>
-            </div>
+                {/* Computer icon */}
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <MonitorCog className="h-7 w-7" />
+                </span>
 
-            {/* Live stats — only when ready */}
-            <WorkspaceStats
-              sandboxId={s.id}
-              enabled={s.status === 'ready'}
-              variant="compact"
-              className="w-full sm:w-56"
-            />
+                {/* Name + status + relative time */}
+                <div className="min-w-0 flex-1 space-y-1">
+                  <Link
+                    href={`/sandboxes/${s.id}`}
+                    className="block truncate font-mono text-base font-semibold text-foreground hover:underline"
+                  >
+                    {s.name}
+                  </Link>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <StatusBadge status={s.status} />
+                    <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-200">
+                      {presetLabel}
+                    </span>
+                    <span>created {formatRelative(s.created_at)}</span>
+                    {/* Iconified micro-stepper replaces the raw `job=…, lifecycle=…` debug text. */}
+                    {(() => {
+                      const parsed = parseStatusMessage(s.status_message);
+                      // Only render the microsteps when we have something meaningful
+                      // to show (i.e. the workspace isn't terminal & we have at
+                      // least one structured field). The component itself returns
+                      // null on `ready`, and renders an inline error on `failed`.
+                      if (s.status === 'ready' || s.status === 'stopped') return null;
+                      return (
+                        <BuildMicrosteps
+                          status={s.status}
+                          jobStatus={parsed.jobStatus}
+                          agentStatus={null}
+                          lifecycleState={parsed.lifecycleState}
+                        />
+                      );
+                    })()}
+                  </div>
+                </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-1.5 self-start sm:self-center">
-              <Button asChild size="sm" variant="default">
-                <Link href={`/sandboxes/${s.id}`} aria-label={`Open ${s.name}`}>
-                  <ArrowUpRight className="h-4 w-4" />
-                  Open
-                </Link>
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={`Delete ${s.name}`}
-                onClick={() => setPendingDelete(s)}
-                className="h-9 w-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </li>
+                {/* Live stats — only when ready */}
+                <WorkspaceStats
+                  sandboxId={s.id}
+                  enabled={s.status === 'ready'}
+                  variant="compact"
+                  className="w-full sm:w-56"
+                />
+
+                {/* Actions */}
+                <div className="flex items-center gap-1.5 self-start sm:self-center">
+                  <Button asChild size="sm" variant="default">
+                    <Link href={`/sandboxes/${s.id}`} aria-label={`Open ${s.name}`}>
+                      <ArrowUpRight className="h-4 w-4" />
+                      Open
+                    </Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Delete ${s.name}`}
+                    onClick={() => setPendingDelete(s)}
+                    className="h-9 w-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </li>
+            );
+          })()
         ))}
       </ul>
 

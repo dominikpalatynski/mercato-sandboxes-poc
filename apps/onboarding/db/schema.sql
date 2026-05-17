@@ -23,6 +23,7 @@ create table if not exists sandboxes (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   name text not null,
+  preset_id text not null default 'crm',
   coder_workspace_id uuid,
   status text not null default 'pending',
   status_message text,
@@ -33,6 +34,8 @@ create table if not exists sandboxes (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+alter table sandboxes add column if not exists preset_id text not null default 'crm';
 
 create index if not exists sandboxes_user_id_idx on sandboxes(user_id);
 

@@ -94,8 +94,21 @@ workspaces:
 
 - `pause` stops the running Coder workspace compute
 - `resume` starts the same Coder workspace again
+- `resume` must relaunch the Mercato dev process with `yarn dev` instead of
+  rerunning first-boot `yarn setup`
 - the existing workspace identity and persistent storage must be reused
 - the sandbox UI exposes this flow from the sandbox detail page
+
+Sandbox creation persists a `preset_id` in onboarding and forwards an immutable
+`sandbox_preset` rich parameter into Coder workspace creation. Both Coder
+templates must support the same active Open Mercato presets:
+
+- `crm`
+- `empty`
+- `classic`
+
+The bare shell workspace remains a planned follow-up and must stay
+non-creatable until onboarding and Coder app links support a non-Mercato UX.
 
 Workspace ports are exposed through Coder's native wildcard access URL:
 
@@ -105,6 +118,22 @@ Workspace ports are exposed through Coder's native wildcard access URL:
 | App | `https://3000--main--<workspace>--<user>.apps.sandbox.lvh.me` |
 | Splash | `https://4000--main--<workspace>--<user>.apps.sandbox.lvh.me` |
 | Terminal | `https://coder.sandbox.lvh.me/@<user>/<workspace>/terminal` |
+
+The Kubernetes Coder template must define VS Code, app, and splash as
+Coder-managed subdomain apps:
+
+- `url` points at the in-workspace listener such as `http://localhost:3000`
+- `subdomain = true`
+- `share = "owner"`
+
+The onboarding app must consume Coder's subdomain app metadata instead of
+reconstructing wildcard hosts locally:
+
+- use `subdomain_name` as the browser-facing host for subdomain apps
+- if `subdomain_name` is only a bare host label, append `WILDCARD_APPS_DOMAIN`
+- preserve any path and query fragment from the proxied `url`
+- for local Kubernetes port-forwarding, normalize the final scheme and port to
+  match `CODER_PUBLIC_URL`
 
 ## Required Environment
 
@@ -140,6 +169,9 @@ transport through reverse proxies.
 11. A ready sandbox can be paused from the sandbox detail page and later
     resumed without creating a new Coder workspace or reinitializing its
     persistent storage.
+12. Sandbox creation offers the `crm`, `empty`, and `classic` Open Mercato
+    presets and first boot runs the matching `create-mercato-app --preset ...`
+    command inside the selected template.
 
 ## Production Notes
 

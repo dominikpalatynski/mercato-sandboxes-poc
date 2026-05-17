@@ -49,6 +49,7 @@ A signup tool that provisions a self-hosted Coder workspace running an Open Merc
          - opencode + codex + claude code CLIs on PATH
          - sidecar postgres (pgvector pg17) on a private docker network
          - on first start: npx create-mercato-app@develop, yarn setup
+         - on later restarts/resume: yarn dev
          - splash on :4000, app on :3000, code-server on :13337
          - 16 GB RAM, 4 vCPU
 ```

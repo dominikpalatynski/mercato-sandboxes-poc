@@ -4,10 +4,17 @@ import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { ensureCoderUser, createWorkspace, CoderApiError } from '@/lib/coder';
 import { assertActiveSandboxEntitlement, BillingError } from '@/lib/billing';
+import {
+  ACTIVE_SANDBOX_PRESET_IDS,
+  DEFAULT_SANDBOX_PRESET,
+  type CreatableSandboxPresetId,
+  type SandboxPresetId,
+} from '@/lib/sandbox-presets';
 
 interface SandboxListRow {
   id: string;
   name: string;
+  preset_id: SandboxPresetId;
   status: string;
   status_message: string | null;
   coder_workspace_id: string | null;
@@ -24,7 +31,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     throw resp;
   }
   const { rows } = await query<SandboxListRow>(
-    `select id, name, status, status_message, coder_workspace_id, created_at, updated_at
+    `select id, name, preset_id, status, status_message, coder_workspace_id, created_at, updated_at
        from sandboxes
       where user_id = $1
       order by created_at desc`,
@@ -37,6 +44,7 @@ const Body = z.object({
   name: z.string().regex(/^[a-z0-9-]{3,32}$/, {
     message: 'Name must be 3-32 chars, lowercase letters, digits and dashes only.',
   }),
+  preset_id: z.enum(ACTIVE_SANDBOX_PRESET_IDS).default(DEFAULT_SANDBOX_PRESET),
 });
 
 interface UserRow {
@@ -70,6 +78,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
   const name = parsed.data.name;
+  const presetId: CreatableSandboxPresetId = parsed.data.preset_id;
 
   try {
     await assertActiveSandboxEntitlement(session.sub);
@@ -113,10 +122,10 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // Insert sandbox row in 'building' state.
   const inserted = await query<{ id: string }>(
-    `insert into sandboxes (user_id, name, status, status_message)
-     values ($1, $2, 'building', $3)
+    `insert into sandboxes (user_id, name, preset_id, status, status_message)
+     values ($1, $2, $3, 'building', $4)
      returning id`,
-    [user.id, name, 'Creating workspace…'],
+    [user.id, name, presetId, 'Creating workspace…'],
   );
   const dbSandboxId = inserted.rows[0]?.id;
   if (!dbSandboxId) {
@@ -124,7 +133,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const ws = await createWorkspace(coderUserId, name);
+    const ws = await createWorkspace(coderUserId, name, { sandboxPreset: presetId });
     await query(
       `update sandboxes
           set coder_workspace_id = $1, status_message = $2, updated_at = now()
@@ -132,11 +141,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       [ws.id, 'Provisioning…', dbSandboxId],
     );
   } catch (e) {
+    const errorMessage = e instanceof CoderApiError ? e.body || e.message : String(e);
     await query(
       `update sandboxes
           set status = 'failed', status_message = $1, updated_at = now()
         where id = $2`,
-      [String(e).slice(0, 500), dbSandboxId],
+      [errorMessage.slice(0, 500), dbSandboxId],
     );
     return NextResponse.json({ id: dbSandboxId, error: String(e) }, { status: 500 });
   }

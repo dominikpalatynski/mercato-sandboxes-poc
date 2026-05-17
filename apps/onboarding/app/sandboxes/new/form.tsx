@@ -14,10 +14,24 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+import type {
+  CreatableSandboxPresetId,
+  SandboxPresetDefinition,
+} from '@/lib/sandbox-presets';
 
-export default function NewSandboxForm() {
+interface Props {
+  creatablePresets: SandboxPresetDefinition[];
+  defaultPresetId: CreatableSandboxPresetId;
+}
+
+export default function NewSandboxForm({
+  creatablePresets,
+  defaultPresetId,
+}: Props) {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [presetId, setPresetId] = useState<CreatableSandboxPresetId>(defaultPresetId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +43,7 @@ export default function NewSandboxForm() {
       const res = await fetch('/api/sandboxes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, preset_id: presetId }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         id?: string;
@@ -59,10 +73,59 @@ export default function NewSandboxForm() {
           <CardTitle>Create a new sandbox</CardTitle>
           <CardDescription>
             Provisioning typically takes 2-4 minutes once you submit. Paid AI access must already
-            be active for sandbox creation to start.
+            be active for sandbox creation to start. The chosen preset only affects first boot;
+            pause/resume keeps the same workspace data.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Sandbox preset</Label>
+              <p className="text-xs text-muted-foreground">
+                One Coder template, different Open Mercato bootstrap commands on first start.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {creatablePresets.map((preset) => {
+                const selected = presetId === preset.id;
+                return (
+                  <label
+                    key={preset.id}
+                    className={cn(
+                      'cursor-pointer rounded-xl border p-4 transition',
+                      selected
+                        ? 'border-primary bg-primary/5 shadow-card'
+                        : 'border-border hover:border-primary/30 hover:bg-accent/30',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="preset_id"
+                      value={preset.id}
+                      checked={selected}
+                      onChange={() => setPresetId(preset.id as CreatableSandboxPresetId)}
+                      className="sr-only"
+                    />
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold">{preset.displayName}</div>
+                        <p className="mt-1 text-xs text-muted-foreground">{preset.description}</p>
+                      </div>
+                      {selected && (
+                        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground">
+                          Selected
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 rounded-md bg-muted/60 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+                      {preset.commandPreview}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="name">Name</Label>
             <Input

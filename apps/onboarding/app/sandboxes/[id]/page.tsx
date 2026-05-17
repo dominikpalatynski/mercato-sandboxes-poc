@@ -6,11 +6,13 @@ import { requireSession } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import StatusPoller, { type SandboxView } from './status-poller';
+import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
 interface SandboxRow {
   id: string;
   user_id: string;
   name: string;
+  preset_id: SandboxPresetId;
   coder_workspace_id: string | null;
   status: string;
   status_message: string | null;
@@ -39,7 +41,7 @@ export default async function SandboxDetailPage({
   const { id } = await params;
 
   const result = await query<SandboxRow>(
-    `select id, user_id, name, coder_workspace_id, status, status_message,
+    `select id, user_id, name, preset_id, coder_workspace_id, status, status_message,
             vscode_url, terminal_url, app_url, splash_url, created_at, updated_at
        from sandboxes
       where id = $1 and user_id = $2`,
@@ -57,6 +59,7 @@ export default async function SandboxDetailPage({
   const initial: SandboxView = {
     id: sandbox.id,
     name: sandbox.name,
+    preset_id: sandbox.preset_id,
     status: sandbox.status,
     status_message: sandbox.status_message,
     vscode_url: sandbox.vscode_url,

@@ -31,11 +31,13 @@ import {
 } from '@/components/ui/collapsible';
 import ProvisioningConsole from '@/components/provisioning-console';
 import WorkspaceStats from '@/components/workspace-stats';
+import { getSandboxPreset, type SandboxPresetId } from '@/lib/sandbox-presets';
 import { cn } from '@/lib/utils';
 
 export interface SandboxView {
   id: string;
   name: string;
+  preset_id: SandboxPresetId;
   status: string;
   status_message: string | null;
   vscode_url: string | null;
@@ -131,6 +133,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
       // preserve those from the initial server-rendered props.
       setSandbox((prev) => ({
         ...data,
+        preset_id: data.preset_id ?? prev.preset_id,
         coder_owner_name: prev.coder_owner_name ?? data.coder_owner_name ?? null,
         coder_workspace_name: prev.coder_workspace_name ?? data.coder_workspace_name ?? null,
       }));
@@ -246,6 +249,7 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
 
   const truncatedId = `${initial.id.slice(0, 8)}…${initial.id.slice(-4)}`;
   const isWorkspaceActionPending = actioning !== null && sandbox.status === 'building';
+  const presetLabel = getSandboxPreset(sandbox.preset_id)?.displayName ?? sandbox.preset_id;
 
   return (
     <div className="space-y-8">
@@ -266,6 +270,9 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
               <Copy className="h-3 w-3" />
               {copyState === 'id' ? 'Copied!' : 'Copy'}
             </button>
+            <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-200">
+              {presetLabel}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
