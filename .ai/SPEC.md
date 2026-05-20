@@ -93,6 +93,11 @@ containing:
 - one PVC for `/home/coder`
 - one PVC for PostgreSQL data
 
+The `infra/` Kubernetes bootstrap path uses the built-in k3s `local-path`
+storage class for workspace PVCs and two simple in-cluster PostgreSQL
+`StatefulSet`s. `infra/helm` must stay free of storage or database operators in
+this default path.
+
 The Kubernetes path reuses the local TLS certificate files under `.runtime/tls`
 by projecting them into a Kubernetes TLS secret for ingress termination.
 

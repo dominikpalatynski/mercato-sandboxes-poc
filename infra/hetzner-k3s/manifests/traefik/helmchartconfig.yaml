@@ -1,0 +1,19 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesIngress:
+        publishedService:
+          enabled: true
+    service:
+      type: LoadBalancer
+      annotations:
+        load-balancer.hetzner.cloud/location: fsn1
+        load-balancer.hetzner.cloud/use-private-ip: "true"
+        load-balancer.hetzner.cloud/name: mercato-edge
+        load-balancer.hetzner.cloud/hostname: sandbox.palatynskicloud.com
+        load-balancer.hetzner.cloud/http-redirect-https: "false"

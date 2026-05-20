@@ -106,9 +106,9 @@ TAINT_CONTROL_PLANE=true TAINT_SYSTEM=true \
 
 `configure-sandbox-node.sh` sets:
 
+- `node-pool=sandbox`
 - `node-type=sandbox`
 - `workload-type=sandbox`
-- `sandbox=true`
 
 The scripts intentionally keep the cluster setup explicit. That matches the MVP
 scope from `.ai/k3s-hetzner-opentofu-sandbox.md`, where OpenTofu stops at the

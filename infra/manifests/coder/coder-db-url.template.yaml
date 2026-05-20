@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coder-db-url
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+type: Opaque
+stringData:
+  # Replace the full value before applying.
+  url: postgres://coder:REPLACE_ME_CODER_DB_PASSWORD@postgres-coder-rw.mercato-sandboxes.svc.cluster.local:5432/coder?sslmode=disable

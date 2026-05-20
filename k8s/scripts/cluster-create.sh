@@ -44,7 +44,9 @@ create_cluster() {
   k3d cluster create "${K3D_CLUSTER_NAME}" \
     --servers "${K3D_SERVERS}" \
     --agents "${K3D_AGENTS}" \
-    --k3s-node-label "mercato.openmercato.dev/workspace=true@agent:*" \
+    --k3s-node-label "node-pool=sandbox@agent:*" \
+    --k3s-node-label "node-type=sandbox@agent:*" \
+    --k3s-node-label "workload-type=sandbox@agent:*" \
     --wait \
     --k3s-arg "--disable=traefik@server:*"
 }
@@ -82,7 +84,9 @@ if [ -n "${agent_nodes}" ]; then
   # Keep workspace workloads off the server node so Mercato's heavy local dev
   # startup does not contend with the control plane and Coder itself.
   printf '%s\n' "${agent_nodes}" | while IFS= read -r node; do
-    kubectl label node "${node}" mercato.openmercato.dev/workspace=true --overwrite >/dev/null
+    kubectl label node "${node}" node-pool=sandbox --overwrite >/dev/null
+    kubectl label node "${node}" node-type=sandbox --overwrite >/dev/null
+    kubectl label node "${node}" workload-type=sandbox --overwrite >/dev/null
   done
 fi
 

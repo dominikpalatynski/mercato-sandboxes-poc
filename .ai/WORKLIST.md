@@ -68,6 +68,14 @@ Working surfaces:
   - AI entitlement, top-up, and usage details live on a dedicated `/billing`
     page
   - blocked sandbox creation on the dashboard now points users to billing
+- Switched the `infra/` Kubernetes path from Longhorn to the built-in k3s
+  `local-path` storage class:
+  - removed the Longhorn Helm release and values from `infra/helm`
+  - updated workspace/bootstrap and simple PostgreSQL StatefulSet manifests to
+    request
+    `local-path`
+  - removed Longhorn node-label assumptions from Hetzner configs, scripts, and
+    operational runbooks
 
 ## Remaining Follow-Up
 

@@ -1,0 +1,125 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "coder-bootstrap.fullname" . }}
+  labels:
+    {{- include "coder-bootstrap.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "coder-bootstrap.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "coder-bootstrap.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      containers:
+        - name: coder-bootstrap
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - python
+            - /scripts/bootstrap.py
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CODER_URL
+              value: {{ .Values.coder.accessUrl | quote }}
+            - name: CODER_PUBLIC_URL
+              value: {{ .Values.coder.publicUrl | quote }}
+            - name: CODER_ORGANIZATION
+              value: {{ .Values.coder.organization | quote }}
+            - name: CODER_CLI_VERSION
+              value: {{ .Values.coder.cliVersion | quote }}
+            - name: CODER_TEMPLATE_NAME
+              value: {{ .Values.coder.templateName | quote }}
+            - name: CODER_TOKEN_NAME
+              value: {{ .Values.coder.tokenName | quote }}
+            - name: CODER_TOKEN_LIFETIME_NS
+              value: {{ .Values.coder.tokenLifetimeNanoseconds | quote }}
+            - name: CODER_TEMPLATE_DIR
+              value: /work/template
+            - name: CODER_FIRST_USER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialsSecret.name }}
+                  key: {{ .Values.credentialsSecret.emailKey }}
+            - name: CODER_FIRST_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialsSecret.name }}
+                  key: {{ .Values.credentialsSecret.usernameKey }}
+            - name: CODER_FIRST_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialsSecret.name }}
+                  key: {{ .Values.credentialsSecret.passwordKey }}
+            - name: CODER_FIRST_USER_FULL_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialsSecret.name }}
+                  key: {{ .Values.credentialsSecret.fullNameKey }}
+            - name: ONBOARDING_ADMIN_SECRET_NAME
+              value: {{ .Values.generatedSecrets.adminTokenName | quote }}
+            - name: ONBOARDING_TEMPLATE_SECRET_NAME
+              value: {{ .Values.generatedSecrets.templateIdName | quote }}
+            - name: SANDBOX_DOMAIN
+              value: {{ .Values.template.sandboxDomain | quote }}
+            - name: WILDCARD_APPS_DOMAIN
+              value: {{ .Values.template.wildcardAppsDomain | quote }}
+            - name: PROXY_SCHEME
+              value: {{ .Values.template.proxyScheme | quote }}
+            - name: PROXY_PORT_SUFFIX
+              value: {{ .Values.template.proxyPortSuffix | quote }}
+            - name: AGENT_CODER_URL
+              value: {{ .Values.coder.internalUrl | quote }}
+            - name: WORKSPACE_NAMESPACE
+              value: {{ .Values.template.workspaceNamespace | quote }}
+            - name: WORKSPACE_IMAGE
+              value: {{ .Values.template.workspaceImage | quote }}
+            - name: WORKSPACE_STORAGE_CLASS
+              value: {{ .Values.template.workspaceStorageClass | quote }}
+            - name: WORKSPACE_HOME_STORAGE
+              value: {{ .Values.template.homeStorageSize | quote }}
+            - name: WORKSPACE_PG_STORAGE
+              value: {{ .Values.template.pgStorageSize | quote }}
+            - name: WORKSPACE_NODE_OPTIONS
+              value: {{ .Values.template.workspaceNodeOptions | quote }}
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: template
+              mountPath: /work/template
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ include "coder-bootstrap.fullname" . }}-script
+            defaultMode: 0555
+        - name: template
+          configMap:
+            name: {{ include "coder-bootstrap.fullname" . }}-template
+            items:
+              - key: README.md
+                path: README.md
+              - key: main.tf
+                path: main.tf
+              - key: workspace-startup.sh.tftpl
+                path: files/workspace-startup.sh.tftpl
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,3 +1,4 @@
+// Keep this file in sync with k8s/coder-template/main.tf.
 terraform {
   required_providers {
     coder = {

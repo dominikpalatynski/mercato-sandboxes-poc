@@ -1,0 +1,3 @@
+[submodule "external/hetzner-k3s"]
+	path = external/hetzner-k3s
+	url = https://github.com/vitobotta/hetzner-k3s.git

@@ -1,13 +1,52 @@
 helmDefaults:
   wait: true
+  waitForJobs: true
   timeout: 600
   atomic: true
 
+repositories:
+  - name: coder-v2
+    url: https://helm.coder.com/v2
+
 releases:
   - name: cert-manager
+    labels:
+      phase: foundation
     namespace: cert-manager
     createNamespace: true
     chart: oci://quay.io/jetstack/charts/cert-manager
     version: v1.20.2
     values:
       - values/cert-manager.yaml
+
+  - name: coder
+    labels:
+      phase: coder
+    namespace: mercato-sandboxes
+    createNamespace: true
+    chart: coder-v2/coder
+    version: 2.30.0
+    values:
+      - values/coder.yaml
+
+  - name: coder-bootstrap
+    labels:
+      phase: coder-bootstrap
+    namespace: mercato-sandboxes
+    createNamespace: true
+    needs:
+      - mercato-sandboxes/coder
+    chart: ./charts/coder-bootstrap
+    values:
+      - values/coder-bootstrap.yaml
+
+  - name: onboarding
+    labels:
+      phase: onboarding
+    namespace: mercato-sandboxes
+    createNamespace: true
+    needs:
+      - mercato-sandboxes/coder-bootstrap
+    chart: ./charts/onboarding
+    values:
+      - values/onboarding.yaml

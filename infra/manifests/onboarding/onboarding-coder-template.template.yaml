@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: onboarding-coder-template
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+type: Opaque
+stringData:
+  template-id: REPLACE_ME_CODER_TEMPLATE_ID

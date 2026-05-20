@@ -1,0 +1,161 @@
+# Keep this file in sync with k8s/coder-template/files/workspace-startup.sh.tftpl.
+set -e
+
+code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
+
+workspace_start_mode="resume"
+dev_command="yarn dev"
+sandbox_preset="${sandbox_preset}"
+sandbox_preset_name="${sandbox_preset_name}"
+bootstrap_command='${bootstrap_command}'
+app_url='${app_url}'
+database_host='${database_host}'
+
+ensure_env_value() {
+  key="$1"
+  value="$2"
+  env_file="$3"
+
+  if grep -q "^$key=" "$env_file"; then
+    sed -i "s#^$key=.*#$key=$value#" "$env_file"
+  else
+    echo "$key=$value" >> "$env_file"
+  fi
+}
+
+configure_codex_profile() {
+  mkdir -p "$HOME/.codex"
+  if [ ! -f "$HOME/.codex/config.toml" ] || grep -q "open-mercato managed openrouter profile" "$HOME/.codex/config.toml"; then
+    cat > "$HOME/.codex/config.toml" <<'EOF'
+# open-mercato managed openrouter profile
+model = "openai/gpt-5"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+EOF
+  fi
+}
+
+bootstrap_open_mercato_workspace() {
+  cd "$HOME"
+  echo "[sandbox] bootstrapping preset $sandbox_preset ($sandbox_preset_name) via: $bootstrap_command" >> /tmp/mercato-dev.log
+  sh -lc "$bootstrap_command"
+
+  cd "$HOME/app"
+  if [ ! -f .env ] && [ -f .env.example ]; then
+    cp .env.example .env
+  fi
+
+  ensure_env_value "DATABASE_URL" "postgres://mercato:mercato@$database_host:5432/mercato" ".env"
+  ensure_env_value "OM_DEV_AUTO_OPEN" "0" ".env"
+  ensure_env_value "OM_DEV_SPLASH_PORT" "4000" ".env"
+  ensure_env_value "APP_URL" "$app_url" ".env"
+  ensure_env_value "NEXT_PUBLIC_APP_URL" "$app_url" ".env"
+  ensure_env_value "APP_ALLOWED_ORIGINS" "$app_url" ".env"
+
+  yarn install
+  yarn mercato agentic:init >/tmp/mercato-agentic-init.log 2>&1 || true
+}
+
+patch_open_mercato_dev_files() {
+  cd "$HOME/app"
+
+  if grep -q "const allowedDevOrigins = isDevelopment ? resolveAllowedDevOrigins() : \\[\\]" next.config.ts 2>/dev/null; then
+    perl -0pi -e "s/const allowedDevOrigins = isDevelopment \\? resolveAllowedDevOrigins\\(\\) : \\[\\]/const allowedDevOrigins = resolveAllowedDevOrigins()/g" next.config.ts
+  fi
+
+  if grep -q "const localMatch = line.match(/^- Local:\\\\s*(.+)$/)" scripts/dev-runtime.mjs 2>/dev/null \
+    && ! grep -q "resolveDisplayedRuntimeBaseUrl" scripts/dev-runtime.mjs 2>/dev/null; then
+node <<'NODE'
+const fs = require('fs')
+const runtimePath = 'scripts/dev-runtime.mjs'
+let source = fs.readFileSync(runtimePath, 'utf8')
+
+const helperMarker = `function readNonEmptyEnvValue(key) {
+  const value = process.env[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}`
+
+if (!source.includes(helperMarker)) {
+  console.warn('[sandbox] unable to patch splash display URL: helper marker not found')
+  process.exit(0)
+}
+
+const helperReplacement = helperMarker + `
+
+function normalizeRuntimeBaseUrl(value) {
+  if (typeof value !== 'string' || value.trim().length === 0) return null
+
+  try {
+    const parsed = new URL(value)
+    parsed.pathname = ''
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\\/$/, '')
+  } catch {
+    return null
+  }
+}
+
+function resolveDisplayedRuntimeBaseUrl(localUrl) {
+  return normalizeRuntimeBaseUrl(process.env.APP_URL)
+    ?? normalizeRuntimeBaseUrl(process.env.NEXT_PUBLIC_APP_URL)
+    ?? normalizeRuntimeBaseUrl(localUrl)
+}`
+source = source.replace(helperMarker, helperReplacement)
+
+const localStartNeedle = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)`
+const localStart = source.indexOf(localStartNeedle)
+const readyStart = source.indexOf('  const readyMatch = line.match', localStart)
+if (localStart === -1 || readyStart === -1) {
+  console.warn('[sandbox] unable to patch splash display URL: local URL block not found')
+  process.exit(0)
+}
+
+const localReplacement = String.raw`  const localMatch = line.match(/^- Local:\s*(.+)$/)
+  if (localMatch) {
+    const displayedUrl = resolveDisplayedRuntimeBaseUrl(localMatch[1]) ?? localMatch[1]
+    return {
+      type: 'status',
+      message: '🌐 App runtime at ' + displayedUrl,
+      splashPhase: startupSplashPhase,
+      splashDetail: 'Dev server is listening at ' + displayedUrl,
+      readyUrl: displayedUrl,
+      loginUrl: displayedUrl.replace(/\/$/, '') + '/login',
+      activity: 'App runtime at ' + displayedUrl,
+      progressCurrent: 4,
+      progressLabel: 'Precompiling login page',
+    }
+  }
+`
+
+source = source.slice(0, localStart) + localReplacement + source.slice(readyStart)
+fs.writeFileSync(runtimePath, source)
+NODE
+  fi
+}
+
+launch_open_mercato_runtime() {
+  export APP_URL="$app_url"
+  export NEXT_PUBLIC_APP_URL="$app_url"
+  export APP_ALLOWED_ORIGINS="$app_url"
+  echo "[sandbox] workspace start mode: $workspace_start_mode; preset: $sandbox_preset; launching Mercato via: $dev_command" >> /tmp/mercato-dev.log
+  nohup env APP_URL="$app_url" NEXT_PUBLIC_APP_URL="$app_url" APP_ALLOWED_ORIGINS="$app_url" sh -lc "$dev_command" >>/tmp/mercato-dev.log 2>&1 &
+}
+
+configure_codex_profile
+
+if [ ! -d "$HOME/app" ]; then
+  workspace_start_mode="bootstrap"
+  dev_command="yarn setup"
+  bootstrap_open_mercato_workspace
+fi
+
+patch_open_mercato_dev_files
+launch_open_mercato_runtime

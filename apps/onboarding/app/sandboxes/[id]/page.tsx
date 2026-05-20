@@ -37,6 +37,9 @@ export default async function SandboxDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const coderPublicUrl = (
+    process.env.CODER_PUBLIC_URL || 'https://coder.sandbox.lvh.me'
+  ).replace(/\/$/, '');
   const session = await requireSession();
   const { id } = await params;
 
@@ -82,6 +85,7 @@ export default async function SandboxDetailPage({
         initial={initial}
         coderEmail={user?.email ?? session.email}
         coderTempPassword={user?.coder_temp_password ?? null}
+        coderPublicUrl={coderPublicUrl}
       />
     </div>
   );

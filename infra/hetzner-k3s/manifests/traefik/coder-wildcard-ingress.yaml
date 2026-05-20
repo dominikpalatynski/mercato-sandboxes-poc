@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: coder-edge
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - coder.sandbox.palatynskicloud.com
+        - "*.apps.sandbox.palatynskicloud.com"
+      secretName: sandbox-palatynskicloud-wildcard-tls
+  rules:
+    - host: coder.sandbox.palatynskicloud.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: coder
+                port:
+                  number: 80
+    - host: "*.apps.sandbox.palatynskicloud.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: coder
+                port:
+                  number: 80

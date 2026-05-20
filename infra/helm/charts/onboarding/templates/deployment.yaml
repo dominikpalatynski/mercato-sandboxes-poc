@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "onboarding.fullname" . }}
+  labels:
+    {{- include "onboarding.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      {{- include "onboarding.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "onboarding.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.databaseMigration.enabled }}
+      initContainers:
+        - name: migrate-db
+          image: "{{ .Values.databaseMigration.image.repository }}:{{ .Values.databaseMigration.image.tag }}"
+          imagePullPolicy: {{ .Values.databaseMigration.image.pullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until psql "$POSTGRES_URL" -c 'select 1' >/dev/null 2>&1; do
+                sleep 2
+              done
+              psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f /etc/onboarding/schema.sql
+          env:
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- range .Values.secretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+          volumeMounts:
+            - name: onboarding-schema
+              mountPath: /etc/onboarding
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: onboarding
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          env:
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- range .Values.secretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+            {{- range .Values.fileSecrets }}
+            - name: {{ .envName }}
+              value: {{ printf "%s/%s" .mountPath (default .secretKey .fileName) | quote }}
+            {{- end }}
+          {{- with .Values.fileSecrets }}
+          volumeMounts:
+            {{- range . }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath | quote }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.fileSecrets }}
+      volumes:
+        {{- if $.Values.databaseMigration.enabled }}
+        - name: onboarding-schema
+          configMap:
+            name: {{ include "onboarding.fullname" $ }}-schema
+            items:
+              - key: schema.sql
+                path: schema.sql
+        {{- end }}
+        {{- range . }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+            items:
+              - key: {{ .secretKey }}
+                path: {{ default .secretKey .fileName }}
+        {{- end }}
+      {{- end }}
+      {{- if and .Values.databaseMigration.enabled (not .Values.fileSecrets) }}
+      volumes:
+        - name: onboarding-schema
+          configMap:
+            name: {{ include "onboarding.fullname" . }}-schema
+            items:
+              - key: schema.sql
+                path: schema.sql
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

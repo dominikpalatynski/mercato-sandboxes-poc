@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: onboarding-coder-admin
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+type: Opaque
+stringData:
+  token: REPLACE_ME_CODER_ADMIN_TOKEN

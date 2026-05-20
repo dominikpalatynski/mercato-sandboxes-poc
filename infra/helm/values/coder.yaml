@@ -1,0 +1,54 @@
+coder:
+  envUseClusterAccessURL: false
+  # This release expects the coder-db-url secret in mercato-sandboxes,
+  # for example from infra/manifests/coder/coder-db-url.template.yaml.
+  env:
+    - name: CODER_PG_CONNECTION_URL
+      valueFrom:
+        secretKeyRef:
+          name: coder-db-url
+          key: url
+    - name: CODER_ACCESS_URL
+      value: "https://coder.sandbox.palatynskicloud.com"
+    - name: CODER_WILDCARD_ACCESS_URL
+      value: "*.apps.sandbox.palatynskicloud.com"
+    - name: CODER_TELEMETRY_ENABLE
+      value: "false"
+    - name: CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE
+      value: "false"
+    - name: CODER_MAX_TOKEN_LIFETIME
+      value: "8760h"
+    - name: CODER_MAX_ADMIN_TOKEN_LIFETIME
+      value: "8760h"
+    - name: CODER_DERP_FORCE_WEBSOCKETS
+      value: "true"
+    - name: CODER_DANGEROUS_ALLOW_PATH_APP_SHARING
+      value: "true"
+    - name: CODER_DANGEROUS_ALLOW_PATH_APP_SITE_OWNER_ACCESS
+      value: "true"
+  serviceAccount:
+    workspacePerms: true
+    enableDeployments: true
+    name: coder
+  nodeSelector:
+    node-pool: system
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: system
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  service:
+    type: ClusterIP
+    sessionAffinity: None
+  ingress:
+    enable: false

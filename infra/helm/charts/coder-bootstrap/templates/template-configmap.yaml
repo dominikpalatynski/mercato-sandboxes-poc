@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "coder-bootstrap.fullname" . }}-template
+  labels:
+    {{- include "coder-bootstrap.labels" . | nindent 4 }}
+data:
+  README.md: |
+{{ .Files.Get "files/template/README.md" | indent 4 }}
+  main.tf: |
+{{ .Files.Get "files/template/main.tf" | indent 4 }}
+  workspace-startup.sh.tftpl: |
+{{ .Files.Get "files/template/files/workspace-startup.sh.tftpl" | indent 4 }}

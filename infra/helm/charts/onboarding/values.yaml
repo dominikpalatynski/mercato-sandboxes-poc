@@ -1,0 +1,120 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: example.invalid/onboarding
+  pullPolicy: IfNotPresent
+  tag: replace-me
+
+imagePullSecrets: []
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  runAsGroup: 1001
+  runAsNonRoot: true
+  runAsUser: 1001
+
+containerPort: 3000
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+env:
+  - name: COOKIE_SECURE
+    value: "true"
+  - name: COOKIE_DOMAIN
+    value: ".sandbox.example.com"
+  - name: CODER_URL
+    value: "http://coder.mercato-sandboxes.svc.cluster.local"
+  - name: CODER_PUBLIC_URL
+    value: "https://coder.sandbox.example.com"
+  - name: WILDCARD_APPS_DOMAIN
+    value: "apps.sandbox.example.com"
+  - name: PAYBYLINK_SIGNATURE_ALGORITHM
+    value: "sha256"
+  - name: BILLING_USD_TO_PLN_RATE
+    value: "4.0"
+  - name: BILLING_ACTIVATION_FEE_PLN
+    value: "0"
+
+secretEnv: []
+# - name: POSTGRES_URL
+#   secretName: onboarding-app-secrets
+#   secretKey: POSTGRES_URL
+
+fileSecrets: []
+# - name: coder-admin-token
+#   envName: CODER_ADMIN_TOKEN_FILE
+#   secretName: onboarding-coder-admin
+#   secretKey: token
+#   mountPath: /run/secrets/coder-admin
+#   fileName: token
+
+databaseMigration:
+  enabled: false
+  image:
+    repository: postgres
+    tag: 17-alpine
+    pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+startupProbe:
+  httpGet:
+    path: /login
+    port: http
+  failureThreshold: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /login
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+
+livenessProbe:
+  httpGet:
+    path: /login
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  hosts:
+    - host: sandbox.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

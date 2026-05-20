@@ -2,6 +2,9 @@
 # build-workspace-image.sh - builds the mercato-workspace image used as the
 # base for every Coder workspace (see .ai/SPEC.md section 3).
 #
+# Local-only helper for the k3d workflow. For production GHCR publishing, use
+# scripts/build-and-push-workspace-image.sh instead.
+#
 # Honors $MERCATO_WORKSPACE_IMAGE (tag) and $WORKSPACE_BUILD_PLATFORM (default
 # linux/arm64 for the Apple Silicon host this POC targets - see section 7).
 

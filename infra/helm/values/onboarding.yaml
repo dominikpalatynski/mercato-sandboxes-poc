@@ -1,0 +1,95 @@
+# Build and push the app image with:
+# bash scripts/build-and-push-onboarding-image.sh
+image:
+  repository: example.invalid/mercato-onboarding
+  tag: replace-me
+
+env:
+  - name: COOKIE_SECURE
+    value: "true"
+  - name: COOKIE_DOMAIN
+    value: ".sandbox.palatynskicloud.com"
+  - name: CODER_URL
+    value: "http://coder.mercato-sandboxes.svc.cluster.local"
+  - name: CODER_PUBLIC_URL
+    value: "https://coder.sandbox.palatynskicloud.com"
+  - name: WILDCARD_APPS_DOMAIN
+    value: "apps.sandbox.palatynskicloud.com"
+  - name: PAYBYLINK_SIGNATURE_ALGORITHM
+    value: "sha256"
+  - name: BILLING_USD_TO_PLN_RATE
+    value: "4.0"
+  - name: BILLING_ACTIVATION_FEE_PLN
+    value: "0"
+
+secretEnv:
+  - name: POSTGRES_URL
+    secretName: onboarding-app-secrets
+    secretKey: POSTGRES_URL
+  - name: JWT_SECRET
+    secretName: onboarding-app-secrets
+    secretKey: JWT_SECRET
+  - name: PAYBYLINK_SHOP_ID
+    secretName: onboarding-app-secrets
+    secretKey: PAYBYLINK_SHOP_ID
+  - name: PAYBYLINK_PRIVATE_KEY
+    secretName: onboarding-app-secrets
+    secretKey: PAYBYLINK_PRIVATE_KEY
+  - name: OPENROUTER_MANAGEMENT_KEY
+    secretName: onboarding-app-secrets
+    secretKey: OPENROUTER_MANAGEMENT_KEY
+  - name: BILLING_SYNC_SECRET
+    secretName: onboarding-app-secrets
+    secretKey: BILLING_SYNC_SECRET
+
+fileSecrets:
+  - name: coder-admin-token
+    envName: CODER_ADMIN_TOKEN_FILE
+    secretName: onboarding-coder-admin
+    secretKey: token
+    mountPath: /run/secrets/coder-admin
+    fileName: token
+  - name: coder-template-id
+    envName: CODER_TEMPLATE_ID_FILE
+    secretName: onboarding-coder-template
+    secretKey: template-id
+    mountPath: /run/secrets/coder-template
+    fileName: template-id
+
+databaseMigration:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+nodeSelector:
+  node-pool: system
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-http
+  hosts:
+    - host: sandbox.palatynskicloud.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - sandbox.palatynskicloud.com
+      secretName: sandbox-palatynskicloud-tls

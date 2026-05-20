@@ -1,0 +1,76 @@
+hetzner_token: ""
+cluster_name: mercato-sandboxes
+kubeconfig_path: "./infra/hetzner-k3s/kubeconfig"
+k3s_version: v1.32.0+k3s1
+
+networking:
+  ssh:
+    port: 22
+    use_agent: false
+    public_key_path: "~/.ssh/mercato_hetzner.pub"
+    private_key_path: "~/.ssh/mercato_hetzner"
+  allowed_networks:
+    ssh:
+      - "203.0.113.10/32"
+    api:
+      - "203.0.113.10/32" # replace with your public IP/CIDR
+  public_network:
+    ipv4: true
+    ipv6: true
+  private_network:
+    enabled: true
+    subnet: 10.0.0.0/16
+  cni:
+    enabled: true
+    encryption: false
+    mode: flannel
+
+schedule_workloads_on_masters: false
+
+masters_pool:
+  instance_type: cpx22
+  instance_count: 1
+  locations:
+    - fsn1
+
+worker_node_pools:
+  - name: system
+    instance_type: cpx22
+    instance_count: 1
+    location: fsn1
+    labels:
+      - key: node-pool
+        value: system
+      - key: node-type
+        value: system
+      - key: workload-type
+        value: system
+
+  - name: sandbox
+    instance_type: cpx32
+    instance_count: 1
+    location: fsn1
+    labels:
+      - key: node-pool
+        value: sandbox
+      - key: node-type
+        value: sandbox
+      - key: workload-type
+        value: sandbox
+
+addons:
+  csi_driver:
+    enabled: false
+  cluster_autoscaler:
+    enabled: false
+  cloud_controller_manager:
+    enabled: true
+  traefik:
+    enabled: true
+  servicelb:
+    enabled: false
+  metrics_server:
+    enabled: true
+
+create_load_balancer_for_the_kubernetes_api: false
+protect_against_deletion: true

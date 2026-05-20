@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "coder-bootstrap.fullname" . }}
+  labels:
+    {{- include "coder-bootstrap.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "coder-bootstrap.serviceAccountName" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "coder-bootstrap.fullname" . }}

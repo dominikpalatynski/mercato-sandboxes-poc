@@ -1,0 +1,6 @@
+apiVersion: v2
+name: onboarding
+description: Helm chart for the Mercato onboarding Next.js app
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -53,13 +53,10 @@ interface Props {
   initial: SandboxView;
   coderEmail: string;
   coderTempPassword: string | null;
+  coderPublicUrl: string;
 }
 
 const POLL_INTERVAL_MS = 3_000;
-
-// next.config.js inlines this at build time; default keeps local dev sane.
-const CODER_PUBLIC_URL =
-  (process.env.NEXT_PUBLIC_CODER_URL || 'https://coder.sandbox.lvh.me').replace(/\/$/, '');
 
 function isTerminalStatus(status: string): boolean {
   return status === 'ready' || status === 'failed' || status === 'stopped';
@@ -82,7 +79,12 @@ function coderLoginHref(sandboxId: string, target: string): string {
   return `/api/coder-login?sandbox_id=${encodeURIComponent(sandboxId)}&next=${encodeURIComponent(target)}`;
 }
 
-export default function StatusPoller({ initial, coderEmail, coderTempPassword }: Props) {
+export default function StatusPoller({
+  initial,
+  coderEmail,
+  coderTempPassword,
+  coderPublicUrl,
+}: Props) {
   const router = useRouter();
   const [sandbox, setSandbox] = useState<SandboxView>(initial);
   const [copyState, setCopyState] = useState<'idle' | 'id' | 'email' | 'password'>('idle');
@@ -232,8 +234,8 @@ export default function StatusPoller({ initial, coderEmail, coderTempPassword }:
 
   const dashboardUrl = useMemo(() => {
     if (!sandbox.coder_owner_name || !sandbox.coder_workspace_name) return null;
-    return `${CODER_PUBLIC_URL}/@${sandbox.coder_owner_name}/${sandbox.coder_workspace_name}`;
-  }, [sandbox.coder_owner_name, sandbox.coder_workspace_name]);
+    return `${coderPublicUrl}/@${sandbox.coder_owner_name}/${sandbox.coder_workspace_name}`;
+  }, [coderPublicUrl, sandbox.coder_owner_name, sandbox.coder_workspace_name]);
 
   // Every link goes through `viaCoderLogin: true` so the browser is guaranteed
   // to carry the `coder_session_token` cookie when it lands on the wildcard

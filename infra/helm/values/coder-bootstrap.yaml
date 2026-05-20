@@ -1,0 +1,62 @@
+image:
+  repository: python
+  tag: "3.12-alpine"
+  pullPolicy: IfNotPresent
+
+coder:
+  accessUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
+  publicUrl: "https://coder.sandbox.palatynskicloud.com"
+  internalUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
+  organization: ""
+  cliVersion: "2.30.0"
+  templateName: "mercato-k8s"
+  tokenName: "onboarding-app-k8s"
+  tokenLifetimeNanoseconds: "31536000000000000"
+
+credentialsSecret:
+  name: "coder-bootstrap-admin"
+  emailKey: "email"
+  usernameKey: "username"
+  passwordKey: "password"
+  fullNameKey: "full-name"
+
+generatedSecrets:
+  adminTokenName: "onboarding-coder-admin"
+  templateIdName: "onboarding-coder-template"
+
+template:
+  workspaceNamespace: "mercato-sandboxes"
+  # Build/push with: bash scripts/build-and-push-workspace-image.sh
+  workspaceImage: "replace-me-workspace-image"
+  workspaceStorageClass: "local-path"
+  homeStorageSize: "20Gi"
+  pgStorageSize: "10Gi"
+  workspaceNodeOptions: "--max-old-space-size=6144"
+  proxyScheme: "https"
+  proxyPortSuffix: ""
+  sandboxDomain: "sandbox.palatynskicloud.com"
+  wildcardAppsDomain: "apps.sandbox.palatynskicloud.com"
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector:
+  node-pool: system
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
