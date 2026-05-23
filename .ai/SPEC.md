@@ -26,33 +26,37 @@ When sandbox creation is blocked because AI access is inactive, onboarding
 should send the user to `/billing` instead of embedding the full billing UI on
 the main dashboard.
 
-## Billing Backends
+## Billing Backend
 
-`apps/onboarding` supports two runtime-selectable billing backends:
+`apps/onboarding` delegates subscription and payment state to Open Mercato.
+There is a single billing path:
 
-- `BILLING_BACKEND=onboarding`
-  - direct sandbox billing inside onboarding
-  - raw `credits_usd` input remains available
-  - onboarding trusts only `/api/billing/paybylink/webhook`
+- signup and billing flows sync the onboarding user into Open Mercato CRM
+- signup creates or reuses a CRM person through `/api/customers/people`
+  using `OPENMERCATO_CUSTOMER_TENANT_ID` and
+  `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
+- `/api/billing/checkout` calls Open Mercato `/api/subscriptions/checkout`
+  with the user's CRM person id as `subjectEntityId` and the onboarding
+  `users.id` (UUID) as `externalAccountId`. Selected price code defaults to
+  `BASIC_PLAN_PRICE_CODE` (`basic-monthly-pln-v1`).
+- payments are handled by Open Mercato's Stripe gateway. Onboarding never
+  talks to Stripe directly.
+- onboarding trusts only `/api/billing/om/webhook` for state changes. The
+  endpoint validates an HMAC signature (`OM_BILLING_WEBHOOK_SECRET`) sent in
+  the `x-om-webhook-signature` header and dedupes deliveries by the
+  `x-om-webhook-delivery-id` header.
+- the source of truth for access state is Open Mercato. `/billing` and the
+  sandbox guard always call `GET /api/subscriptions/access` and reconcile the
+  local OpenRouter key + Coder secrets against the returned `entitlements`.
+- refund/chargeback/cancelled events arrive as `accessState='blocked'` and
+  cause onboarding to disable the OpenRouter key and mark the local
+  `llm_accounts` row `suspended`.
 
-- `BILLING_BACKEND=openmercato`
-  - signup and billing flows sync the onboarding user into Open Mercato CRM
-  - signup creates or reuses a CRM person through `/api/customers/people`
-    using `OPENMERCATO_CUSTOMER_TENANT_ID` and
-    `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
-  - `/billing` renders Open Mercato-managed activation/top-up plans instead of
-    raw amount entry
-  - checkout/payment sessions are created through the Open Mercato
-    `sandbox-billing` bridge contract
-  - onboarding trusts only `/api/billing/openmercato/webhook` for payment state
-  - refund/chargeback events suspend the local OpenRouter entitlement and block
-    sandbox create/resume until reactivation
-
-In both modes onboarding remains the source of truth for:
+Onboarding remains the source of truth for:
 
 - local login/session
 - sandbox lifecycle
-- OpenRouter key lifecycle
+- OpenRouter key lifecycle (limit = `entitlements.openRouterTokensUsageUsd`)
 - usage snapshots shown on `/billing`
 - Coder secret synchronization
 

@@ -2,7 +2,7 @@
 # bash scripts/build-and-push-onboarding-image.sh
 image:
   repository: ghcr.io/dominikpalatynski/mercato-onboarding
-  tag: git-205f910v2
+  tag: git-205f910v3
 
 imagePullSecrets:
   - name: ghcr-pull
@@ -52,7 +52,7 @@ secretEnv:
     secretKey: BILLING_SYNC_SECRET
   - name: OPENMERCATO_API_KEY
     secretName: onboarding-app-secrets
-    secretKey: OPENMERCATO_API_KEYY
+    secretKey: OPENMERCATO_API_KEY
   - name: OPENMERCATO_CUSTOMER_TENANT_ID
     secretName: onboarding-app-secrets
     secretKey: OPENMERCATO_CUSTOMER_TENANT_ID

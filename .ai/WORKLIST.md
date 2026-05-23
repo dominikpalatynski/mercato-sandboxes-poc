@@ -259,16 +259,25 @@ Working surfaces:
     resume before any manual reactivation
   - document whether the live OM environment exposes a provider/core
     chargeback event; alpha code currently treats chargeback as deferred
-- Decide and document the long-term PayByLink boundary:
-  - `apps/onboarding/lib/paybylink.ts` is an onboarding-only OpenRouter budget
-    flow, not an Open Mercato-native checkout/payment-gateway provider.
-  - If sandbox billing must align with Open Mercato checkout/pay links, add a
-    real `gateway_paybylink` provider package upstream or in a maintained fork
-    and route payments through `paymentGatewayService` plus
-    `/api/payment_gateways/webhook/paybylink`.
-  - The current vendored OM bridge did not need a dedicated PayByLink adapter
-    for local tests; it still needs an explicit live-provider contract before
-    production rollout.
+- Migrated billing to Open Mercato `subscriptions` + `gateway-stripe`:
+  - removed `apps/onboarding/lib/paybylink.ts`, `lib/billing.ts`,
+    `lib/billing-types.ts`, `tests/billing.test.ts`,
+    `tests/paybylink.test.ts`, and `/api/billing/paybylink/webhook/route.ts`
+  - added `apps/onboarding/lib/openmercato-subscriptions.ts` (typed wrapper
+    over OM `/api/subscriptions/checkout` + `/api/subscriptions/access`) and
+    `apps/onboarding/lib/om-billing.ts` (orchestrator: checkout, reconcile,
+    HMAC webhook, sandbox guard, cron usage sync)
+  - rewrote `/api/billing/checkout`, `/api/billing/summary`,
+    `/api/internal/billing/sync-usage`, `/api/sandboxes`, `/dashboard`, and
+    `/billing` UI to consume the new orchestrator
+  - added `apps/onboarding/app/api/billing/om/webhook/route.ts` — HMAC-signed
+    inbound from CRM
+  - added `apps/crm/src/modules/onboarding_bridge` custom module: a
+    persistent subscriber on `subscriptions.access.changed` that posts an
+    HMAC-signed payload to onboarding's webhook. Registered in
+    `apps/crm/src/modules.ts`, regenerated via `yarn generate`.
+  - documented the new ENV-y in `.ai/SPEC-OPENROUTER-ONBOARDING.md` and
+    rewrote the flows section to reflect Stripe → OM → CRM bridge → onboarding
 - Run the first real Hetzner bootstrap from `infra/terraform`:
   verify `tofu apply` against a real Hetzner project, then verify manual k3s
   install on `master-01`, worker join on `worker-sandbox-01`, kubeconfig

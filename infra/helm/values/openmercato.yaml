@@ -8,7 +8,7 @@
 #   --push
 image:
   repository: ghcr.io/dominikpalatynski/crm
-  tag: v1.2.0
+  tag: v1.3.0
 
 imagePullSecrets:
   - name: ghcr-pull
@@ -37,6 +37,7 @@ app:
     OM_SANDBOX_BILLING_ENABLE_MOCK_GATEWAYS: "true"
     OM_SANDBOX_BILLING_AUTO_SEED: "true"
     OM_SANDBOX_BILLING_AUTO_SEED_PROVIDER: "mock"
+    OM_SUBSCRIPTIONS_PLANS_FILE=/absolute/path/to/your-app/config/subscriptions/plans.ts
   secretEnv:
     jwtSecret: REPLACE_ME_OPENMERCATO_JWT_SECRET
     authSecret: REPLACE_ME_OPENMERCATO_AUTH_SECRET

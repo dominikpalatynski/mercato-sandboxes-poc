@@ -2,12 +2,10 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { requireSessionFromRequest } from '@/lib/auth';
-import { createBillingCheckout, BillingError } from '@/lib/billing';
-import { BILLING_PLAN_TYPES } from '@/lib/billing-types';
+import { OmBillingError, startSubscriptionCheckout } from '@/lib/om-billing';
 
 const Body = z.object({
-  plan_type: z.enum(BILLING_PLAN_TYPES),
-  credits_usd: z.number().positive().finite(),
+  price_code: z.string().min(1).max(128).optional(),
 });
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -19,11 +17,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     throw response;
   }
 
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  let payload: unknown = {};
+  if (req.headers.get('content-length') !== '0') {
+    try {
+      payload = await req.json();
+    } catch {
+      payload = {};
+    }
   }
 
   const parsed = Body.safeParse(payload);
@@ -35,15 +35,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = await createBillingCheckout({
+    const result = await startSubscriptionCheckout({
       userId: session.sub,
-      planType: parsed.data.plan_type,
-      creditsUsd: parsed.data.credits_usd,
       baseUrl: req.url,
+      priceCode: parsed.data.price_code,
     });
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(
+      {
+        checkout_url: result.checkoutUrl,
+        subscription_request_id: result.subscriptionRequestId,
+        price_code: result.priceCode,
+        product_code: result.productCode,
+      },
+      { status: 201 },
+    );
   } catch (error) {
-    if (error instanceof BillingError) {
+    if (error instanceof OmBillingError) {
       return NextResponse.json(
         { error: error.message, code: error.code },
         { status: error.status },

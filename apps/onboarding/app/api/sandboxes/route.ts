@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { query } from '@/lib/db';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { ensureCoderUser, createWorkspace, CoderApiError } from '@/lib/coder';
-import { assertActiveSandboxEntitlement, BillingError } from '@/lib/billing';
+import { assertActiveSandboxEntitlement, OmBillingError } from '@/lib/om-billing';
 import {
   ACTIVE_SANDBOX_PRESET_IDS,
   DEFAULT_SANDBOX_PRESET,
@@ -83,7 +83,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   try {
     await assertActiveSandboxEntitlement(session.sub);
   } catch (error) {
-    if (error instanceof BillingError) {
+    if (error instanceof OmBillingError) {
       return NextResponse.json(
         { error: error.message, code: error.code },
         { status: error.status },

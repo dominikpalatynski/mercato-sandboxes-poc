@@ -1,7 +1,8 @@
 # Mini-Spec: OpenRouter Billing and Key Provisioning in Onboarding
 
-Date: 2026-05-16
-Status: Implemented in repo; live provider smoke pending
+Date: 2026-05-16 (revised 2026-05-22)
+Status: PayByLink path removed. Open Mercato subscriptions are now the
+authoritative billing/payment provider for onboarding.
 Scope: Alpha
 
 ## Purpose
@@ -9,17 +10,28 @@ Scope: Alpha
 Enable paid AI access for sandbox users so one paid account can use both Codex
 and Claude inside the provisioned workspace.
 
-All API, persistence, and orchestration for this flow must live in
-`apps/onboarding`. No separate backend service is introduced for alpha.
+Payment and subscription state live in Open Mercato (CRM). Onboarding owns the
+side effects of "access granted": provisioning a per-user OpenRouter key and
+synchronizing it as a Coder user secret.
 
 ## Decisions
 
-- `apps/onboarding` is the only backend for signup, billing, webhook handling,
-  OpenRouter provisioning, usage reporting, and sandbox entitlement checks.
-- Alpha billing is intentionally separate from Open Mercato's native
-  `checkout` and `payment_gateways` modules. The `apps/onboarding`
-  `PayByLink` flow provisions OpenRouter budget for sandbox access; it is not a
-  generic Open Mercato pay-links implementation.
+- Open Mercato `subscriptions` is the canonical source of truth for plan,
+  price, payment session, subscription lifecycle, and access state. Onboarding
+  never talks to Stripe directly.
+- Onboarding owns business side effects: OpenRouter key lifecycle, Coder
+  secret sync, usage snapshots, and sandbox creation guard.
+- The bridge from Open Mercato to onboarding is a CRM custom module
+  (`apps/crm/src/modules/onboarding_bridge`) that subscribes to
+  `subscriptions.access.changed` and forwards an HMAC-signed POST to
+  `onboarding /api/billing/om/webhook`.
+- Onboarding's webhook trusts only signed payloads; it dedupes by delivery
+  id, then calls `GET /api/subscriptions/access` against OM as the source of
+  truth before mutating local state.
+- `/billing` page and the sandbox creation guard run the same idempotent
+  reconcile path so dropped webhooks self-heal on next user interaction.
+- The legacy PayByLink path (`lib/paybylink.ts`,
+  `/api/billing/paybylink/webhook`) is fully removed.
 - The onboarding backend stores one OpenRouter Management API key server-side.
 - Each user gets one OpenRouter inference key that is reused across sandbox
   sessions and top-ups.
@@ -59,22 +71,36 @@ All API, persistence, and orchestration for this flow must live in
 
 ## Implementation Locations
 
-### New or updated backend modules
+### Onboarding backend modules
 
-- `apps/onboarding/lib/openrouter.ts`
-- `apps/onboarding/lib/paybylink.ts`
-- `apps/onboarding/lib/billing.ts`
+- `apps/onboarding/lib/openrouter.ts` — OpenRouter management API client
+- `apps/onboarding/lib/openmercato-client.ts` — base Open Mercato REST client
+- `apps/onboarding/lib/openmercato-subscriptions.ts` — typed subscriptions client
+- `apps/onboarding/lib/openmercato-customers.ts` — CRM customer sync (signup)
+- `apps/onboarding/lib/om-billing.ts` — orchestrator: checkout, reconcile,
+  webhook processing, sandbox guard, usage sync
 - `apps/onboarding/lib/coder.ts`
 - `apps/onboarding/lib/db.ts`
 
-### New or updated route handlers
+### Onboarding route handlers
 
 - `apps/onboarding/app/api/signup/route.ts`
 - `apps/onboarding/app/api/sandboxes/route.ts`
 - `apps/onboarding/app/api/billing/checkout/route.ts`
-- `apps/onboarding/app/api/billing/paybylink/webhook/route.ts`
+- `apps/onboarding/app/api/billing/om/webhook/route.ts`
 - `apps/onboarding/app/api/billing/summary/route.ts`
 - `apps/onboarding/app/api/internal/billing/sync-usage/route.ts`
+
+### CRM bridge module
+
+- `apps/crm/src/modules/onboarding_bridge/index.ts`
+- `apps/crm/src/modules/onboarding_bridge/subscribers/on-access-changed-forward.ts`
+- `apps/crm/src/modules.ts` registers the module with `from: '@app'`. Run
+  `yarn generate` after edits.
+- `apps/crm/src/plans.ts` declares the basic plan
+  (`code: 'basic'`, `productCode: 'basic-sandbox'`, price
+  `basic-monthly-pln-v1`, entitlements `{ sandboxCount, openRouterTokensUsageUsd }`).
+  Run the OM `subscriptions sync-plans` command before checkout works.
 
 ### Database and workspace template changes
 
@@ -85,17 +111,24 @@ All API, persistence, and orchestration for this flow must live in
 
 ## Runtime Configuration
 
-Required environment:
+Onboarding requires:
 
 - `OPENROUTER_MANAGEMENT_KEY` or `OPENROUTER_MANAGEMENT_API_KEY`
-- `PAYBYLINK_SHOP_ID`
-- `PAYBYLINK_PRIVATE_KEY`
-- `BILLING_SYNC_SECRET`
+- `OPENMERCATO_API_BASE_URL` (or legacy `OPENMERCATO_BILLING_BASE_URL`)
+- `OPENMERCATO_API_KEY` — API key whose role has `subscriptions.manage`,
+  `subscriptions.access`, and `customers.people.view/manage`
+- `OPENMERCATO_CUSTOMER_TENANT_ID`, `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
+- `OM_BILLING_WEBHOOK_SECRET` — shared HMAC secret with the CRM bridge
+- `BILLING_SYNC_SECRET` — for the internal `sync-usage` cron endpoint
+- optional: `BASIC_PLAN_PRICE_CODE` (default `basic-monthly-pln-v1`)
+- optional: `BASIC_PLAN_PRODUCT_CODE` (default `basic-sandbox`)
 
-Optional pricing configuration:
+CRM requires (for the bridge subscriber):
 
-- `BILLING_USD_TO_PLN_RATE`
-- `BILLING_ACTIVATION_FEE_PLN`
+- `ONBOARDING_WEBHOOK_URL` — onboarding's `/api/billing/om/webhook` endpoint
+- `ONBOARDING_WEBHOOK_SECRET` — same value as onboarding's `OM_BILLING_WEBHOOK_SECRET`
+- optional: `ONBOARDING_WEBHOOK_PRODUCT_CODE` (default `basic-sandbox`) —
+  restricts forwarding to events for this product.
 
 ## Data Model
 
@@ -211,30 +244,41 @@ Responsibilities:
 The module accepts only server-side credentials and returns typed results used
 by billing orchestration. It never writes to the database directly.
 
-### `lib/paybylink.ts`
+### `lib/openmercato-subscriptions.ts`
 
-Responsibilities:
+Typed wrapper over `OpenMercatoClient` for the OM subscriptions endpoints:
 
-- create a checkout session or payment link
-- verify webhook signatures and normalize event payloads
-- map provider-specific fields into stable billing-domain fields
+- `createSubscriptionCheckout()` → POST `/api/subscriptions/checkout`
+- `getSubscriptionAccess()` → GET `/api/subscriptions/access`
+- Helper `readEntitlementsView()` and `hasGrantedAccess()`
 
-This module also never writes to the database directly.
+Never writes to the local database.
 
-### `lib/billing.ts`
+### `lib/om-billing.ts`
 
-Responsibilities:
+The orchestration layer. Combines DB writes, Coder calls, OpenRouter calls,
+and Open Mercato subscription state. Key functions:
 
-- create a pending order
-- mark an order paid in an idempotent transaction
-- provision the first OpenRouter key for a user
-- apply a top-up to an existing OpenRouter key
-- synchronize secrets into Coder
-- update `llm_accounts` and `llm_usage_snapshots`
-- suspend an account after refund/chargeback/admin action
+- `startSubscriptionCheckout({ userId, baseUrl, priceCode })` — calls OM
+  checkout with `externalAccountId=user.id` and
+  `subjectEntityId=user.openmercato_customer_person_id`. Writes a
+  `billing_orders` audit row keyed by `subscriptionRequestId`.
+- `reconcileLlmAccessForUser(userId)` — idempotent. Reads OM access snapshot
+  as the source of truth, then creates/updates/disables the OpenRouter key,
+  upserts the Coder secret, and updates `llm_accounts` +
+  `llm_usage_snapshots`. Returns `{ accessSnapshot, llmAccountStatus, changed }`.
+- `processOmAccessChangedWebhook({ rawBody, signature, deliveryId })` —
+  verifies HMAC signature, dedupes by `provider_event_id` in
+  `billing_events`, then calls `reconcileLlmAccessForUser`.
+- `getOmBillingSummaryForUser(userId)` — read-only summary for `/billing`.
+- `assertActiveSandboxEntitlement(userId)` — reconcile-then-check guard for
+  the sandbox creation route.
+- `syncActiveOmBillingUsage()` — cron-driven: for every active llm_account,
+  reconcile then push a fresh OpenRouter usage snapshot.
 
-This is the orchestration layer that combines DB writes, Coder calls, and
-OpenRouter calls.
+Suspension is automatic: when OM reports `accessState='blocked'`,
+`reconcileLlmAccessForUser` disables the OpenRouter key and marks the
+local llm_account `suspended`.
 
 ### `lib/coder.ts`
 
@@ -254,32 +298,36 @@ its secrets synchronized with the provider state.
 
 Authenticated route.
 
-Request body:
+Request body (all optional):
 
-- `plan_type`: `activation` or `topup`
-- `credits_usd`: numeric amount to provision after payment
-
-Behavior:
-
-- creates a `billing_orders` row with `status='pending'`
-- calls PayByLink
-- stores `provider_order_id`
-- returns a payment URL and the local order id
-
-### `POST /api/billing/paybylink/webhook`
-
-Unauthenticated route protected by provider signature verification.
+- `price_code`: explicit OM `subscription_prices.code`; defaults to
+  `BASIC_PLAN_PRICE_CODE` env (`basic-monthly-pln-v1`).
 
 Behavior:
 
-- verifies signature, provider order id, amount, and currency
-- inserts a `billing_events` row keyed by `provider_event_id`
-- if already processed, returns success without duplicating work
-- marks the target order as `paid`
-- ensures the user has a Coder user
-- creates or updates the OpenRouter key
-- synchronizes Coder user secrets
-- updates `llm_accounts`
+- requires the user to have a CRM person id (`openmercato_customer_person_id`)
+- calls Open Mercato `POST /api/subscriptions/checkout`
+- writes a `billing_orders(provider='om_stripe', status='pending')` audit row
+  keyed by `provider_order_id = subscriptionRequestId`
+- returns `{ checkout_url, subscription_request_id, price_code, product_code }`
+
+### `POST /api/billing/om/webhook`
+
+Unauthenticated route protected by HMAC signature.
+
+Headers:
+
+- `x-om-webhook-signature`: hex-encoded `HMAC-SHA256(raw_body)` using
+  `OM_BILLING_WEBHOOK_SECRET`
+- `x-om-webhook-delivery-id`: idempotency key
+
+Behavior:
+
+- verifies signature; rejects with 401 on mismatch
+- dedupes by `billing_events.provider_event_id = delivery_id`
+- ignores events with `productCode` ≠ configured product
+- calls `reconcileLlmAccessForUser(externalAccountId)` which fetches the
+  authoritative snapshot from OM and updates local state accordingly
 
 ### `GET /api/billing/summary`
 
@@ -318,54 +366,69 @@ Protection:
 ### 2. Checkout
 
 1. Authenticated user calls `POST /api/billing/checkout`.
-2. Onboarding creates `billing_orders(status='pending')`.
-3. Onboarding requests a PayByLink payment URL.
-4. UI redirects the user to payment.
+2. Onboarding calls OM `/api/subscriptions/checkout` with the user's CRM
+   person id as `subjectEntityId` and the onboarding user id (UUID) as
+   `externalAccountId`.
+3. OM creates the Stripe Checkout session.
+4. Onboarding writes a `billing_orders` audit row and returns the checkout
+   URL to the UI.
+5. UI redirects the user to Stripe.
 
 ### 3. First successful payment
 
-1. PayByLink calls `POST /api/billing/paybylink/webhook`.
-2. Onboarding validates the webhook and records `billing_events`.
-3. Onboarding marks the order `paid`.
-4. If the user has no `coder_user_id`, onboarding runs `ensureCoderUser`.
-5. Onboarding creates one OpenRouter inference key.
-6. Onboarding stores only metadata plus `openrouter_key_hash`.
-7. Onboarding upserts per-user Coder secrets:
-   - `OPENROUTER_API_KEY`
-   - `ANTHROPIC_AUTH_TOKEN`
-8. Onboarding marks `llm_accounts.status='active'` and
-   `coder_secret_sync_state='synced'`.
+1. Stripe sends its webhook to OM. The OM `gateway_stripe` subscribers
+   create/update the `Subscription` and emit `subscriptions.access.changed`.
+2. The CRM `onboarding_bridge` subscriber posts an HMAC-signed payload to
+   onboarding `/api/billing/om/webhook`.
+3. Onboarding validates the signature, dedupes by delivery id, records a
+   `billing_events` row, and calls `reconcileLlmAccessForUser`.
+4. `reconcileLlmAccessForUser` reads `/api/subscriptions/access` from OM as
+   the source of truth, then:
+   - if `coder_user_id` is missing, runs `ensureCoderUser`
+   - creates an OpenRouter inference key with
+     `limit = entitlements.openRouterTokensUsageUsd`
+   - upserts the Coder user secrets `OPENROUTER_API_KEY` and
+     `ANTHROPIC_AUTH_TOKEN`
+   - marks `llm_accounts.status='active'`,
+     `coder_secret_sync_state='synced'`
 
 ### 4. Sandbox creation after payment
 
 1. Authenticated user calls `POST /api/sandboxes`.
-2. Onboarding verifies:
-   - the user owns an active `llm_accounts` row
+2. `assertActiveSandboxEntitlement` reconciles the user (in case the webhook
+   was dropped or the user got here before the webhook), then verifies:
+   - OM access state is `granted` or `grace`
+   - local `llm_accounts.status='active'`
    - `coder_secret_sync_state='synced'`
 3. Only then does onboarding create the Coder workspace.
 
-### 5. Top-up
+### 5. Renewal or plan change
 
-1. Authenticated user creates another checkout with `plan_type='topup'`.
-2. A paid webhook updates the existing OpenRouter key limit instead of creating
-   a new key.
-3. Coder secrets remain unchanged because the key value itself does not change.
+1. Stripe webhook → OM subscriber → CRM bridge → onboarding webhook.
+2. Onboarding reconciles. If `entitlements.openRouterTokensUsageUsd`
+   changed, the OpenRouter key limit is updated in place; otherwise it is
+   a no-op.
 
 ### 6. Usage sync
 
 1. Internal cron calls `POST /api/internal/billing/sync-usage`.
-2. Onboarding reads current usage from OpenRouter.
-3. Onboarding stores `llm_usage_snapshots`.
-4. Dashboard summary reads the latest snapshot for display.
+2. For each active `llm_account`, onboarding reconciles, then fetches the
+   latest OpenRouter usage and inserts `llm_usage_snapshots`.
 
-### 7. Refund, chargeback, or suspension
+### 7. Refund, chargeback, or cancellation
 
-1. Billing state is changed to `refunded`, `chargeback`, or admin-suspended.
-2. Onboarding disables the OpenRouter key.
-3. Onboarding marks `llm_accounts.status='suspended'` or `revoked`.
-4. New sandbox creation is blocked immediately.
-5. Existing workspace sessions lose future provider access when the secret stops
-   authorizing requests.
+1. OM emits `subscriptions.access.changed` with `accessState='blocked'`.
+2. Onboarding reconciles, disables the OpenRouter key, and marks
+   `llm_accounts.status='suspended'`.
+3. New sandbox creation is blocked immediately.
+4. Existing workspace sessions lose future provider access when the secret
+   stops authorizing requests.
+
+### 8. `/billing` page fallback reconcile
+
+Every request to the `/billing` page calls `reconcileLlmAccessForUser` so a
+user returning from Stripe before the webhook arrives still sees the correct
+state. Reconcile is idempotent and safe to call repeatedly.
 
 ## Workspace Bootstrap Changes
 
@@ -386,30 +449,37 @@ Expected secret usage in the workspace:
 
 ## Sandbox Guard Rules
 
-`apps/onboarding/app/api/sandboxes/route.ts` must reject creation when any of
-the following are true:
+`apps/onboarding/app/api/sandboxes/route.ts` calls
+`assertActiveSandboxEntitlement`, which reconciles first and then rejects
+creation when any of the following are true:
 
-- no paid `billing_orders` exist for the user
+- OM access state is not `granted` or `grace`
 - no `llm_accounts` row exists for the user
 - `llm_accounts.status` is not `active`
 - `coder_secret_sync_state` is not `synced`
 
 Expected response for blocked users:
 
-- `402` or `403` with a stable JSON error code the UI can render
+- `402` with `code: 'ai_entitlement_required'`
 
 ## Verification Plan
 
 ### Automated
 
-- API test: `POST /api/billing/checkout` creates `billing_orders`
-- API test: repeated webhook delivery with the same `provider_event_id` is
-  idempotent
-- API test: first successful payment creates `llm_accounts`
-- API test: top-up updates the existing `llm_accounts` row rather than creating
-  a second one
-- API test: `POST /api/sandboxes` returns blocked status for unpaid users
-- unit test: OpenRouter payload mapping and webhook signature verification
+- Unit test: `OpenMercatoClient` posts to `/api/subscriptions/checkout` with
+  the correct subject entity type and price code.
+- Unit test: `getSubscriptionAccess` queries the access endpoint with the
+  configured product code.
+- Unit test: `startSubscriptionCheckout` refuses when the user has no
+  CRM person id and writes a `billing_orders` audit row when OM returns a
+  session URL.
+- Unit test: `reconcileLlmAccessForUser` provisions an OR key + Coder secret
+  on `granted`, is a no-op on already-active accounts at the right limit,
+  and suspends on `blocked`.
+- Unit test: `verifyOmWebhookSignature` accepts a valid HMAC and rejects
+  bad/missing signatures.
+- Unit test: `processOmAccessChangedWebhook` is idempotent across duplicate
+  delivery ids and ignores events for other product codes.
 
 ### Manual smoke
 

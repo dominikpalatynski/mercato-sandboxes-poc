@@ -2182,6 +2182,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@open-mercato/cache@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/cache@npm:0.6.3-canary.3622.1.24446247b0"
+  dependencies:
+    "@types/better-sqlite3": "npm:^7.6.13"
+  peerDependencies:
+    better-sqlite3: ">=9.0.0"
+    ioredis: ^5.0.0
+  peerDependenciesMeta:
+    better-sqlite3:
+      optional: true
+    ioredis:
+      optional: true
+  checksum: 10c0/7d1a0e353dae669859568008223fde49bfc3bce3c0dafaa89622c49733287c507725f62c4a6b73a5cf22f6c04cde0e66a365e460bd8b22f4a204d0bd1919cb7b
+  languageName: node
+  linkType: hard
+
 "@open-mercato/cache@npm:0.6.3-develop.3611.1.6e565f84ab":
   version: 0.6.3-develop.3611.1.6e565f84ab
   resolution: "@open-mercato/cache@npm:0.6.3-develop.3611.1.6e565f84ab"
@@ -2249,6 +2266,33 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@open-mercato/core@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/core@npm:0.6.3-canary.3622.1.24446247b0"
+  dependencies:
+    "@mikro-orm/core": "npm:^7.0.17"
+    "@mikro-orm/decorators": "npm:^7.0.17"
+    "@mikro-orm/postgresql": "npm:^7.0.17"
+    "@xyflow/react": "npm:^12.10.2"
+    ai: "npm:^6.0.185"
+    date-fns: "npm:4.2.1"
+    date-fns-tz: "npm:^3.2.0"
+    html-to-text: "npm:^10.0.0"
+    mammoth: "npm:^1.9.0"
+    pdfjs-dist: "npm:^5.7.284"
+    semver: "npm:^7.8.0"
+    ts-pattern: "npm:^5.0.0"
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    "@open-mercato/ai-assistant": 0.6.3-canary.3622.1.24446247b0
+    "@open-mercato/shared": 0.6.3-canary.3622.1.24446247b0
+    "@open-mercato/ui": 0.6.3-canary.3622.1.24446247b0
+    react: ^19.0.0
+    react-dom: ^19.0.0
+  checksum: 10c0/a72cd416e65ebb7ad0eba786751c0d11e8c07397d5eb897c97c7492671584b4edda5c757248abe4c4eed9b344f8f05ac877c7dcf42e0bbce028de644a9f782db
+  languageName: node
+  linkType: hard
+
 "@open-mercato/core@npm:0.6.3-develop.3611.1.6e565f84ab":
   version: 0.6.3-develop.3611.1.6e565f84ab
   resolution: "@open-mercato/core@npm:0.6.3-develop.3611.1.6e565f84ab"
@@ -2287,22 +2331,22 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@open-mercato/gateway-stripe@npm:0.6.3-develop.3611.1.6e565f84ab":
-  version: 0.6.3-develop.3611.1.6e565f84ab
-  resolution: "@open-mercato/gateway-stripe@npm:0.6.3-develop.3611.1.6e565f84ab"
+"@open-mercato/gateway-stripe@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/gateway-stripe@npm:0.6.3-canary.3622.1.24446247b0"
   dependencies:
-    "@open-mercato/core": "npm:0.6.3-develop.3611.1.6e565f84ab"
-    "@open-mercato/queue": "npm:0.6.3-develop.3611.1.6e565f84ab"
-    "@open-mercato/ui": "npm:0.6.3-develop.3611.1.6e565f84ab"
+    "@open-mercato/core": "npm:0.6.3-canary.3622.1.24446247b0"
+    "@open-mercato/queue": "npm:0.6.3-canary.3622.1.24446247b0"
+    "@open-mercato/ui": "npm:0.6.3-canary.3622.1.24446247b0"
     "@stripe/react-stripe-js": "npm:^6.4.0"
     "@stripe/stripe-js": "npm:^9.6.0"
     stripe: "npm:^22.1.1"
   peerDependencies:
     "@mikro-orm/postgresql": ^7.0.14
-    "@open-mercato/shared": 0.6.3-develop.3611.1.6e565f84ab
+    "@open-mercato/shared": 0.6.3-canary.3622.1.24446247b0
     react: ^19.0.0
     react-dom: ^19.0.0
-  checksum: 10c0/684dd6aad03fca126747f63daef698616b9268eeadf658a47068ce99050a6d94891f05b9b4f702cb91645e3b12c5ae20b584f997fcd1e9749c6e513f65c7751d
+  checksum: 10c0/6476b3964780cf2ef88a9034461d23b1d3b6d321324f4b714dfb19285e0317ff1d3af78a9a243fba61b52fb8398a74440a30aef1d0b34f81aed089ee6468f2af
   languageName: node
   linkType: hard
 
@@ -2312,6 +2356,20 @@ __metadata:
   peerDependencies:
     "@open-mercato/shared": 0.6.3-develop.3611.1.6e565f84ab
   checksum: 10c0/dd0fd44e2887bab312ab0187d1fc36db06cf8214da33ebcbe1569566aac61e2ee3a21378502af06fb581fa76fd319c97c2544b5d18f99076427936b58c90c4a2
+  languageName: node
+  linkType: hard
+
+"@open-mercato/queue@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/queue@npm:0.6.3-canary.3622.1.24446247b0"
+  dependencies:
+    "@open-mercato/shared": "npm:0.6.3-canary.3622.1.24446247b0"
+  peerDependencies:
+    bullmq: ^5.0.0
+  peerDependenciesMeta:
+    bullmq:
+      optional: true
+  checksum: 10c0/8a39526f80acefe5a815d406e8bb2862c7893d19c423cd54c33541320c3b3250691cc59112716f0728238b51a06ea4feab802c19c1d0f2fd4aa83e6c8267917f
   languageName: node
   linkType: hard
 
@@ -2373,6 +2431,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@open-mercato/shared@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/shared@npm:0.6.3-canary.3622.1.24446247b0"
+  dependencies:
+    "@mikro-orm/core": "npm:^7.0.17"
+    "@mikro-orm/decorators": "npm:^7.0.17"
+    "@mikro-orm/postgresql": "npm:^7.0.17"
+    "@open-mercato/cache": "npm:0.6.3-canary.3622.1.24446247b0"
+    dotenv: "npm:^17.4.2"
+    rate-limiter-flexible: "npm:^11.1.0"
+    re2js: "npm:2.8.2"
+    reflect-metadata: "npm:^0.2.2"
+    sanitize-html: "npm:^2.17.4"
+    undici: "npm:^8.3.0"
+  checksum: 10c0/9710d08c601e6ea9a8f8be5839e31e3ddd139ff009066f43bd436f418c2a2e2662cd65d96a5e10ab002f6d19b320621aeda4793bcec1c6364591ac967700d27e
+  languageName: node
+  linkType: hard
+
 "@open-mercato/shared@npm:0.6.3-develop.3611.1.6e565f84ab":
   version: 0.6.3-develop.3611.1.6e565f84ab
   resolution: "@open-mercato/shared@npm:0.6.3-develop.3611.1.6e565f84ab"
@@ -2404,6 +2480,34 @@ __metadata:
     react: ^19.0.0
     react-dom: ^19.0.0
   checksum: 10c0/959a57df9f0d94a7639173492cb6eaf9936a09713981bc2de1479eff54b906a5cf6ba970d4bb8ffdc161aef1df73a13d55d3e57c8ea44c84fccbdb86784b35c3
+  languageName: node
+  linkType: hard
+
+"@open-mercato/ui@npm:0.6.3-canary.3622.1.24446247b0":
+  version: 0.6.3-canary.3622.1.24446247b0
+  resolution: "@open-mercato/ui@npm:0.6.3-canary.3622.1.24446247b0"
+  dependencies:
+    "@dnd-kit/core": "npm:^6.3.1"
+    "@dnd-kit/sortable": "npm:^10.0.0"
+    "@dnd-kit/utilities": "npm:^3.2.2"
+    "@radix-ui/react-accordion": "npm:^1.2.4"
+    "@radix-ui/react-popover": "npm:^1.1.6"
+    "@radix-ui/react-radio-group": "npm:^1.2.3"
+    "@radix-ui/react-select": "npm:^2.1.6"
+    "@radix-ui/react-tooltip": "npm:^1.2.8"
+    "@tanstack/react-virtual": "npm:^3.13.24"
+    date-fns: "npm:4.2.1"
+    react-big-calendar: "npm:^1.19.4"
+    react-day-picker: "npm:^10.0.1"
+    react-markdown: "npm:^10.1.0"
+    recharts: "npm:^3.8.1"
+    remark-gfm: "npm:^4.0.1"
+  peerDependencies:
+    "@open-mercato/shared": 0.6.3-canary.3622.1.24446247b0
+    react: ">=18.0.0"
+    react-dom: ">=18.0.0"
+    react-is: ">=18.0.0"
+  checksum: 10c0/2b85a4852d479ffa8f6ee5035dde266499f76e51af62e7ab88dfe6429848595ebab536e64dcdd7782d9d0a77b8967d12726edcc9e3b153a672d7bc75b69059e4
   languageName: node
   linkType: hard
 
@@ -6624,9 +6728,9 @@ __metadata:
     "@open-mercato/checkout": "npm:0.6.3-develop.3611.1.6e565f84ab"
     "@open-mercato/cli": "npm:0.6.3-develop.3611.1.6e565f84ab"
     "@open-mercato/content": "npm:0.6.3-develop.3611.1.6e565f84ab"
-    "@open-mercato/core": "npm:0.6.3-develop.3611.1.6e565f84ab"
+    "@open-mercato/core": "npm:0.6.3-canary.3622.1.24446247b0"
     "@open-mercato/events": "npm:0.6.3-develop.3611.1.6e565f84ab"
-    "@open-mercato/gateway-stripe": "npm:0.6.3-develop.3611.1.6e565f84ab"
+    "@open-mercato/gateway-stripe": "npm:0.6.3-canary.3622.1.24446247b0"
     "@open-mercato/onboarding": "npm:0.6.3-develop.3611.1.6e565f84ab"
     "@open-mercato/queue": "npm:0.6.3-develop.3611.1.6e565f84ab"
     "@open-mercato/scheduler": "npm:0.6.3-develop.3611.1.6e565f84ab"

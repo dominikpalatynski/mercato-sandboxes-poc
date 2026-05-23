@@ -21,7 +21,10 @@ export const enabledModules: ModuleEntry[] = [
   { id: 'feature_toggles', from: '@open-mercato/core' },
   { id: 'ai_assistant', from: '@open-mercato/ai-assistant' },
   { id: 'api_keys', from: '@open-mercato/core' },
-
+  { id: 'subscriptions', from: '@open-mercato/core' },
+  { id: 'payment_gateways', from: '@open-mercato/core' },
+  { id: 'gateway_stripe', from: '@open-mercato/gateway-stripe' },
+  { id: 'onboarding_bridge', from: '@app' },
 ]
 
 const enterpriseModulesEnabled = parseBooleanWithDefault(process.env.OM_ENABLE_ENTERPRISE_MODULES, false)

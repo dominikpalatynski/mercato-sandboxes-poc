@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireSession } from '@/lib/auth';
 import { query } from '@/lib/db';
-import { getBillingSummaryForUser } from '@/lib/billing';
+import { getOmBillingSummaryForUser } from '@/lib/om-billing';
 import SandboxCards, { type DashboardSandbox } from './sandbox-cards';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage(): Promise<React.ReactElement> {
   const session = await requireSession();
-  const billingSummary = await getBillingSummaryForUser(session.sub);
+  const billingSummary = await getOmBillingSummaryForUser(session.sub);
   const { rows } = await query<SandboxRow>(
     `select id, name, preset_id, status, status_message, created_at
        from sandboxes
@@ -43,7 +43,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           <h1 className="text-2xl font-semibold">Your sandboxes</h1>
           <p className="text-sm text-muted-foreground">Signed in as {session.email}</p>
         </div>
-        {billingSummary.can_create_sandbox ? (
+        {billingSummary.canCreateSandbox ? (
           <Link
             href="/sandboxes/new"
             className="rounded bg-primary px-4 py-2 font-medium text-primary-foreground hover:bg-primary/90"
@@ -55,7 +55,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             href="/billing"
             className="rounded border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
-            Open billing to activate AI access
+            Open billing to subscribe and activate AI access
           </Link>
         )}
       </div>

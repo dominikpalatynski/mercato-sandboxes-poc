@@ -1,4 +1,4 @@
-import { BILLING_ERROR_CODES } from '@/lib/billing-types';
+import { BILLING_ERROR_CODES } from '@/lib/om-billing';
 
 export type OpenRouterLimitReset = 'daily' | 'weekly' | 'monthly' | null;
 

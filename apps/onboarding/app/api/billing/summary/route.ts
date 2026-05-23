@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireSessionFromRequest } from '@/lib/auth';
-import { getBillingSummaryForUser } from '@/lib/billing';
+import { getOmBillingSummaryForUser } from '@/lib/om-billing';
 
 export async function GET(req: Request): Promise<NextResponse> {
   let session;
@@ -12,6 +12,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     throw response;
   }
 
-  const summary = await getBillingSummaryForUser(session.sub);
+  const summary = await getOmBillingSummaryForUser(session.sub);
   return NextResponse.json(summary);
 }
