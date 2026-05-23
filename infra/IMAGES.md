@@ -1,6 +1,6 @@
 # Image Build And Push
 
-This repo now assumes a simple public GHCR workflow for production images:
+This repo now assumes a simple GHCR workflow for production images:
 
 - build images manually with `docker buildx`
 - push them to public GitHub Container Registry
@@ -14,6 +14,7 @@ Default repositories:
 
 - `ghcr.io/palatynskicloud/mercato-workspace`
 - `ghcr.io/palatynskicloud/mercato-onboarding`
+- `ghcr.io/dominikpalatynski/openmercato`
 
 Default tag convention:
 
@@ -116,17 +117,78 @@ That means:
 - the workspace image stays environment-agnostic
 - the onboarding image also becomes `build once, deploy anywhere`
 
-## Why No Pull Secrets
+## Workspace Pull Secrets
 
-Because these images are public in GHCR:
+If the workspace image is private in GHCR, create a registry secret in the
+workspace namespace and point the Coder bootstrap values at it:
 
-- Kubernetes does not need `imagePullSecrets`
-- the Coder workspace template can reference the public image directly
+```bash
+kubectl create secret docker-registry ghcr-pull \
+  --namespace mercato-sandboxes \
+  --docker-server=ghcr.io \
+  --docker-username=<github-user> \
+  --docker-password=<github-token>
+```
+
+Then set:
+
+```yaml
+template:
+  workspaceImagePullSecrets:
+    - ghcr-pull
+```
+
+in [infra/helm/values/coder-bootstrap.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/helm/values/coder-bootstrap.yaml:1).
+
+If the workspace image is public, leave `workspaceImagePullSecrets` empty.
 
 ## Recommended Manual Release Flow
 
 1. Build and push `mercato-workspace`.
 2. Update `template.workspaceImage` in `infra/helm/values/coder-bootstrap.yaml`.
-3. Build and push `mercato-onboarding`.
-4. Update `image.repository` and `image.tag` in `infra/helm/values/onboarding.yaml`.
-5. Apply the relevant Helmfile phases.
+3. If the workspace image is private, set `template.workspaceImagePullSecrets`.
+4. Build and push `mercato-onboarding`.
+5. Update `image.repository` and `image.tag` in `infra/helm/values/onboarding.yaml`.
+6. Apply the relevant Helmfile phases.
+
+## CRM Image
+
+Preferred path: run the GitHub Actions workflow at
+`.github/workflows/build-crm-image.yml`.
+
+The workflow:
+
+- builds `apps/crm/Dockerfile`
+- targets `linux/amd64`
+- reuses a GitHub Actions Buildx cache
+- always pushes `ghcr.io/dominikpalatynski/crm:git-<shortsha>`
+- also pushes an explicit release tag when started with `workflow_dispatch`
+  `image_tag=<tag>` or from a git tag matching `crm-v*`
+
+If the package owner differs from the repository owner, add repo secrets
+`GHCR_USERNAME` and `GHCR_TOKEN`. Otherwise the default `GITHUB_TOKEN` login is
+enough for same-owner GHCR pushes.
+
+Manual fallback:
+
+```bash
+IMAGE_TAG=git-$(git rev-parse --short HEAD)
+docker buildx build \
+  --platform linux/amd64 \
+  -f apps/crm/Dockerfile \
+  -t ghcr.io/dominikpalatynski/crm:${IMAGE_TAG} \
+  apps/crm \
+  --push
+```
+
+After the push, manually update:
+
+- [infra/helm/values/openmercato.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/helm/values/openmercato.yaml:1)
+
+Set:
+
+```yaml
+image:
+  repository: ghcr.io/dominikpalatynski/crm
+  tag: <tag>
+```

@@ -16,6 +16,10 @@ All API, persistence, and orchestration for this flow must live in
 
 - `apps/onboarding` is the only backend for signup, billing, webhook handling,
   OpenRouter provisioning, usage reporting, and sandbox entitlement checks.
+- Alpha billing is intentionally separate from Open Mercato's native
+  `checkout` and `payment_gateways` modules. The `apps/onboarding`
+  `PayByLink` flow provisions OpenRouter budget for sandbox access; it is not a
+  generic Open Mercato pay-links implementation.
 - The onboarding backend stores one OpenRouter Management API key server-side.
 - Each user gets one OpenRouter inference key that is reused across sandbox
   sessions and top-ups.
@@ -26,6 +30,9 @@ All API, persistence, and orchestration for this flow must live in
 - Alpha billing is denominated in USD budget at the provider layer, even if the
   product UI describes the plan in token-oriented language.
 - Alpha does not expose the raw OpenRouter key in the onboarding UI.
+- If full Open Mercato-native pay links are required later, implement a real
+  `PayByLink` gateway provider in Open Mercato's `payment_gateways` layer
+  instead of extending this onboarding-only billing schema.
 - Creating a sandbox requires an active paid AI entitlement and successfully
   synchronized Coder secrets.
 

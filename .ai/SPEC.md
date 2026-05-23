@@ -26,6 +26,36 @@ When sandbox creation is blocked because AI access is inactive, onboarding
 should send the user to `/billing` instead of embedding the full billing UI on
 the main dashboard.
 
+## Billing Backends
+
+`apps/onboarding` supports two runtime-selectable billing backends:
+
+- `BILLING_BACKEND=onboarding`
+  - direct sandbox billing inside onboarding
+  - raw `credits_usd` input remains available
+  - onboarding trusts only `/api/billing/paybylink/webhook`
+
+- `BILLING_BACKEND=openmercato`
+  - signup and billing flows sync the onboarding user into Open Mercato CRM
+  - signup creates or reuses a CRM person through `/api/customers/people`
+    using `OPENMERCATO_CUSTOMER_TENANT_ID` and
+    `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
+  - `/billing` renders Open Mercato-managed activation/top-up plans instead of
+    raw amount entry
+  - checkout/payment sessions are created through the Open Mercato
+    `sandbox-billing` bridge contract
+  - onboarding trusts only `/api/billing/openmercato/webhook` for payment state
+  - refund/chargeback events suspend the local OpenRouter entitlement and block
+    sandbox create/resume until reactivation
+
+In both modes onboarding remains the source of truth for:
+
+- local login/session
+- sandbox lifecycle
+- OpenRouter key lifecycle
+- usage snapshots shown on `/billing`
+- Coder secret synchronization
+
 ## Current Local Topology
 
 The local stack is published by one nginx `edge` container:
@@ -98,6 +128,12 @@ storage class for workspace PVCs and two simple in-cluster PostgreSQL
 `StatefulSet`s. `infra/helm` must stay free of storage or database operators in
 this default path.
 
+The same `infra/helm` path also ships an optional standalone `openmercato`
+release for cluster-local CRM experiments. That release stays intentionally
+simple too: one app `Deployment`, one PVC for `/app/apps/mercato/storage`, and
+single-replica PostgreSQL plus Redis `StatefulSet`s with no external operator
+dependencies.
+
 The Kubernetes path reuses the local TLS certificate files under `.runtime/tls`
 by projecting them into a Kubernetes TLS secret for ingress termination.
 
@@ -109,6 +145,7 @@ by projecting them into a Kubernetes TLS secret for ingress termination.
 | `coder` | Coder control plane, listening on internal port 80 |
 | `postgres-onboarding` | onboarding app database |
 | `onboarding` | Next.js signup/dashboard app |
+| `openmercato` | standalone Open Mercato app on Kubernetes |
 | `edge` | nginx HTTPS edge for onboarding, Coder, and Coder wildcard apps |
 
 The local Traefik/docker-socket-proxy/shim path has been removed.
@@ -186,6 +223,13 @@ COOKIE_SECURE=true
 `CODER_DERP_FORCE_WEBSOCKETS=true` is enabled to force ordinary WebSocket DERP
 transport through reverse proxies.
 
+When onboarding should create or reuse CRM people during signup, also set:
+
+```env
+OPENMERCATO_CUSTOMER_TENANT_ID=<open-mercato-tenant-uuid>
+OPENMERCATO_CUSTOMER_ORGANIZATION_ID=<open-mercato-organization-uuid>
+```
+
 ## Acceptance Criteria
 
 1. `./start.sh` starts Coder, onboarding, databases, and nginx edge.
@@ -210,6 +254,11 @@ transport through reverse proxies.
 13. Authenticated onboarding exposes a dedicated `/billing` page for AI usage
     and checkout actions, while `/dashboard` stays focused on sandbox
     management.
+14. `BILLING_BACKEND=openmercato` switches `/billing` to Open Mercato-managed
+    plan selection, creates or reuses the signup CRM person with the scoped
+    Open Mercato API credential, creates checkout sessions through the bridge,
+    trusts only signed Open Mercato outbound webhooks, and blocks sandbox
+    create/resume after refund/chargeback entitlement suspension.
 
 ## Production Notes
 

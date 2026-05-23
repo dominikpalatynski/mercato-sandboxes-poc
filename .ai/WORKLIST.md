@@ -76,6 +76,84 @@ Working surfaces:
     `local-path`
   - removed Longhorn node-label assumptions from Hetzner configs, scripts, and
     operational runbooks
+- Added an additive `infra/helm/charts/openmercato` release for standalone Open
+  Mercato deployment on the cluster:
+  - app runtime uses the upstream production image with the same
+    `yarn mercato init` / migrate-on-start bootstrap contract as
+    `docker-compose.fullapp.yml`
+  - PostgreSQL and Redis are kept intentionally simple as single-replica
+    `StatefulSet`s with `local-path` PVCs
+  - fulltext search remains optional until an external Meilisearch endpoint is
+    configured
+- Implemented the Open Mercato-backed sandbox billing bridge on the onboarding
+  side:
+  - added `BILLING_BACKEND=onboarding|openmercato` runtime selection
+  - added Open Mercato CRM sync persistence on `users` plus checkout/order
+    correlation fields on `billing_orders`
+  - signup now creates or reuses a CRM person through `/api/customers/people`
+    when `OPENMERCATO_CUSTOMER_TENANT_ID` and
+    `OPENMERCATO_CUSTOMER_ORGANIZATION_ID` are configured, and stores the
+    returned CRM entity/profile ids on `users`
+  - `/billing` now renders Open Mercato-managed activation/top-up plans when
+    the Open Mercato backend is active, while the direct onboarding path keeps
+    the raw credits entry flow
+  - onboarding now creates Open Mercato-backed hosted checkout URLs and trusts
+    only the signed `/api/billing/openmercato/webhook` route for that backend
+  - completed Open Mercato events reuse the existing OpenRouter entitlement
+    provisioning path, while refund/chargeback events suspend entitlement and
+    block sandbox create/resume
+  - automated verification now covers the Open Mercato webhook signature check,
+    plan-based checkout creation, idempotent completed delivery, and refund
+    suspension behavior
+- Implemented the vendored Open Mercato-side sandbox billing bridge under
+  `external/openmercato/apps/mercato/src/modules/sandbox_billing`:
+  - added app-local module metadata, ACL, setup, validators, bridge libs,
+    route handlers, subscribers, and outbound webhook worker
+  - added `GET /api/sandbox-billing/plans` backed by sandbox-tagged
+    `catalog_products` plus checkout-link pricing resolution
+  - added idempotent `POST /api/sandbox-billing/customer-sync` backed by
+    `customer_entities` / `customer_people`
+  - `POST /api/sandbox-billing/checkout` now returns an Open Mercato-hosted pay
+    URL plus encrypted correlation token without editing vendored checkout core
+  - the public OM pay page receives sandbox correlation through the
+    `checkout.pay-page:form` injection seam and app-local success/cancel page
+    overrides redirect back to onboarding after pay-page submit
+  - normalized checkout lifecycle plus refund events into
+    `sandbox.payment.completed|failed|cancelled|expired|refunded`
+  - signed outbound OM webhooks with the Standard Webhooks helper and kept
+    legacy `x-openmercato-*` headers during transition so onboarding can
+    verify both formats
+  - added `mercato sandbox_billing seed-plans --tenant <tenantId> --org <organizationId> [--provider <providerKey>]`
+    to seed a local sandbox product catalog plus hosted-checkout links,
+    defaulting to the built-in `mock` provider for UI smoke tests
+  - added env-gated auto-seeding hooks so the same plans can be initialized on
+    `mercato init`, `mercato seed:defaults --module sandbox_billing`,
+    `yarn dev`, and `yarn start` via
+    `OM_SANDBOX_BILLING_AUTO_SEED=true` plus optional
+    `OM_SANDBOX_BILLING_AUTO_SEED_PROVIDER=<providerKey>`
+  - added standalone `apps/crm` mock gateway support for sandbox billing:
+    `sandbox_billing/di.ts` now registers `mock`, `mock_usd`, and
+    `mock_processing` descriptors/adapters/webhook handlers, gated by
+    `OM_SANDBOX_BILLING_ENABLE_MOCK_GATEWAYS`, and the `crm` app now enables
+    the required `integrations`, `catalog`, `checkout`, `payment_gateways`,
+    and `api_keys` modules for local bridge smoke tests
+  - updated the k8s Helm path for the standalone `apps/crm` deployment:
+    `infra/helm/charts/openmercato` now mounts `/app/storage`, keeps the init
+    marker under `/app/storage/.initialized`, exposes generic inline app
+    secret keys for sandbox billing envs, and the release values now wire
+    hosted-checkout bridge envs plus mock-provider auto-seeding
+  - onboarding Helm values and secret templates now support the Open Mercato
+    billing backend through `BILLING_BACKEND=openmercato`,
+    `OPENMERCATO_BILLING_BASE_URL`,
+    `OPENMERCATO_BILLING_API_KEY`, and
+    `OPENMERCATO_BILLING_WEBHOOK_SECRET`
+  - fixed the standalone `apps/crm` production image regression for k8s:
+    the final runner stage now copies `/app/scripts`, and `cross-spawn` moved
+    to runtime dependencies so `node ./scripts/start.mjs` can execute after
+    `yarn start`
+  - added targeted verification for plans/customer-sync/checkout routes,
+    hosted-checkout token handling, outbound signing, vendored checkout route
+    regression, and the onboarding Standard Webhooks verifier
 
 ## Remaining Follow-Up
 
@@ -103,13 +181,30 @@ Working surfaces:
     document `jobs` and `fg <job>` for bringing `yarn dev` back to the
     foreground; otherwise do not claim `fg` works for the current background
     process model.
-- Improve workspace developer bootstrap:
-  - Install GitHub CLI `gh` in `mercato-workspace`.
-  - Keep `git` installed and verify it is available in fresh workspaces.
-  - Initialize `/home/coder/app` as a local git repository after
-    `create-mercato-app` if it is not already a repo.
-  - Make interactive shells start in `/home/coder/app` by default so users land
-    directly in the app folder.
+- Implement the GitHub onboarding repo-connect flow per
+  `.ai/SPEC-GITHUB-ONBOARDING-INTEGRATION.md`:
+  - Add GitHub OAuth connect/status/owner-list/disconnect routes in
+    `apps/onboarding` and verify with route/unit tests plus a manual OAuth
+    browser path.
+- Automate the remaining k8s sandbox-billing bootstrap seam:
+  - mint the scoped Open Mercato bridge `x-api-key` after first CRM init and
+    persist it back into the onboarding secret automatically
+  - verify with a live `helmfile ... apply` plus browser/API smoke on the
+    deployed cluster
+  - Add encrypted `github_accounts`, `sandbox_github_repos`, and
+    `sandbox_github_bootstraps` persistence in onboarding and verify with
+    schema review plus route/unit tests.
+  - Extend sandbox creation so a GitHub-connected user can request automatic
+    empty-repo creation and verify with API tests for validation and state
+    transitions.
+  - Install GitHub CLI `gh` in `mercato-workspace`, keep `git` available,
+    initialize `/home/coder/app` as a repo when needed, and make shells land in
+    `/home/coder/app`; verify in a fresh workspace terminal.
+  - Pass GitHub bootstrap parameters into both Coder templates and verify with
+    unit tests for `createWorkspace(...)` plus manual first-boot inspection.
+  - Bootstrap `origin`, local credentials, and initial push inside the
+    workspace startup script and verify with `git remote get-url origin`,
+    `git ls-remote origin`, `gh api /user`, and a VS Code Source Control push.
 - Implement the planned bare shell preset end-to-end:
   - decide how onboarding should render non-Mercato links and labels
   - expose at least ports `3000` and `8080` through Coder apps
@@ -154,6 +249,26 @@ Working surfaces:
   - note the current local verification already covers automated tests plus
     `next build` through compile/type/static generation; the final standalone
     trace copy is blocked locally by `ENOSPC`
+- Run a live Open Mercato billing smoke against a configured bridge instance:
+  - confirm signup/customer sync creates or updates the expected CRM contact
+  - confirm `/billing` loads real Open Mercato plans and creates a working
+    payment URL for both activation and top-up
+  - confirm a real `sandbox.payment.completed` event provisions exactly one
+    OpenRouter account/key and a repeated delivery stays idempotent
+  - confirm `sandbox.payment.refunded` suspends entitlement and blocks sandbox
+    resume before any manual reactivation
+  - document whether the live OM environment exposes a provider/core
+    chargeback event; alpha code currently treats chargeback as deferred
+- Decide and document the long-term PayByLink boundary:
+  - `apps/onboarding/lib/paybylink.ts` is an onboarding-only OpenRouter budget
+    flow, not an Open Mercato-native checkout/payment-gateway provider.
+  - If sandbox billing must align with Open Mercato checkout/pay links, add a
+    real `gateway_paybylink` provider package upstream or in a maintained fork
+    and route payments through `paymentGatewayService` plus
+    `/api/payment_gateways/webhook/paybylink`.
+  - The current vendored OM bridge did not need a dedicated PayByLink adapter
+    for local tests; it still needs an explicit live-provider contract before
+    production rollout.
 - Run the first real Hetzner bootstrap from `infra/terraform`:
   verify `tofu apply` against a real Hetzner project, then verify manual k3s
   install on `master-01`, worker join on `worker-sandbox-01`, kubeconfig

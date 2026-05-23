@@ -27,7 +27,9 @@ generatedSecrets:
 template:
   workspaceNamespace: "mercato-sandboxes"
   # Build/push with: bash scripts/build-and-push-workspace-image.sh
-  workspaceImage: "replace-me-workspace-image"
+  workspaceImage: "ghcr.io/dominikpalatynski/mercato-workspace:git-205f910"
+  workspaceImagePullSecrets:
+    - "ghcr-pull"
   workspaceStorageClass: "local-path"
   homeStorageSize: "20Gi"
   pgStorageSize: "10Gi"

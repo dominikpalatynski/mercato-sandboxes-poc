@@ -50,3 +50,14 @@ releases:
     chart: ./charts/onboarding
     values:
       - values/onboarding.yaml
+
+  - name: openmercato
+    labels:
+      phase: openmercato
+    namespace: mercato-sandboxes
+    createNamespace: true
+    needs:
+      - cert-manager/cert-manager
+    chart: ./charts/openmercato
+    values:
+      - values/openmercato.yaml

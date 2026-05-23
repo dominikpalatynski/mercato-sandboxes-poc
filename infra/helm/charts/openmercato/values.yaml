@@ -1,0 +1,183 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: example.invalid/openmercato
+  pullPolicy: IfNotPresent
+  tag: replace-me
+
+imagePullSecrets: []
+
+app:
+  containerPort: 3000
+  command:
+    - /bin/sh
+    - -lc
+    - |
+      INIT_MARKER_FILE="/app/storage/.initialized" \
+      INIT_COMMAND="yarn initialize" \
+      sh /app/docker/scripts/init-or-migrate.sh
+      exec yarn start
+  env:
+    NODE_ENV: production
+    APP_URL: https://openmercato.example.com
+    NEXT_PUBLIC_APP_URL: https://openmercato.example.com
+    APP_ALLOWED_ORIGINS: ""
+    SELF_SERVICE_ONBOARDING_ENABLED: "true"
+    DEMO_MODE: "true"
+    UPGRADE_ACTIONS_ENABLED: "true"
+    NEXT_PUBLIC_UPGRADE_ACTIONS_ENABLED: "true"
+    TENANT_DATA_ENCRYPTION: "yes"
+    ENABLE_CRUD_API_CACHE: "true"
+    CACHE_STRATEGY: redis
+    QUEUE_STRATEGY: async
+    NEXT_PUBLIC_QUEUE_STRATEGY: async
+    AUTO_SPAWN_WORKERS: "true"
+    AUTO_SPAWN_SCHEDULER: "true"
+    OM_DISABLE_VECTOR_SEARCH_AUTOINDEXING: "true"
+    OM_AI_PROVIDER: openai
+    OM_AI_MODEL: gpt-5-mini
+  secretEnv:
+    jwtSecret: change-me-jwt-secret
+    authSecret: change-me-auth-secret
+    tenantDataEncryptionFallbackKey: change-me-tenant-encryption-fallback-key
+    initSuperadminEmail: superadmin@example.com
+    initSuperadminPassword: change-me-superadmin-password
+    extra: {}
+  extraEnv: []
+  extraSecretEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    fsGroup: 1001
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    runAsGroup: 1001
+    runAsNonRoot: true
+    runAsUser: 1001
+  deploymentStrategy:
+    type: Recreate
+  storage:
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    storageClassName: local-path
+    mountPath: /app/storage
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  startupProbe:
+    httpGet:
+      path: /login
+      port: http
+    failureThreshold: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      path: /login
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  livenessProbe:
+    httpGet:
+      path: /login
+      port: http
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+postgres:
+  auth:
+    database: openmercato
+    username: openmercato
+    password: change-me-openmercato-db-password
+  image:
+    repository: pgvector/pgvector
+    pullPolicy: IfNotPresent
+    tag: pg17-trixie
+  service:
+    port: 5432
+  persistence:
+    accessModes:
+      - ReadWriteOnce
+    size: 20Gi
+    storageClassName: local-path
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  startupProbe:
+    periodSeconds: 10
+    failureThreshold: 30
+  readinessProbe:
+    periodSeconds: 10
+  livenessProbe:
+    periodSeconds: 10
+    failureThreshold: 6
+
+redis:
+  image:
+    repository: redis
+    pullPolicy: IfNotPresent
+    tag: 7-alpine
+  command:
+    - redis-server
+    - --appendonly
+    - "yes"
+  service:
+    port: 6379
+  persistence:
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+    storageClassName: local-path
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  startupProbe:
+    periodSeconds: 10
+    failureThreshold: 30
+  readinessProbe:
+    periodSeconds: 10
+  livenessProbe:
+    periodSeconds: 10
+    failureThreshold: 6
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  annotations: {}
+  hosts:
+    - host: openmercato.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

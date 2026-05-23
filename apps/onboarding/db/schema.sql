@@ -18,6 +18,8 @@ alter table users add column if not exists first_name text;
 alter table users add column if not exists last_name text;
 alter table users add column if not exists company_name text;
 alter table users add column if not exists accepted_terms_at timestamptz;
+alter table users add column if not exists openmercato_customer_entity_id uuid;
+alter table users add column if not exists openmercato_customer_person_id uuid;
 
 create table if not exists sandboxes (
   id uuid primary key default gen_random_uuid(),

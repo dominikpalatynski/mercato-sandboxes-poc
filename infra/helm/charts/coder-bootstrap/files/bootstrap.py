@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import platform
+import shutil
 import ssl
 import subprocess
 import sys
@@ -70,6 +71,7 @@ TEMPLATE_VARIABLES = {
     "agent_coder_url": env("AGENT_CODER_URL", required=True),
     "workspace_namespace": env("WORKSPACE_NAMESPACE", NAMESPACE),
     "workspace_image": env("WORKSPACE_IMAGE", required=True),
+    "workspace_image_pull_secrets": env("WORKSPACE_IMAGE_PULL_SECRETS", ""),
     "workspace_storage_class": env("WORKSPACE_STORAGE_CLASS", "local-path"),
     "home_storage_size": env("WORKSPACE_HOME_STORAGE", "20Gi"),
     "pg_storage_size": env("WORKSPACE_PG_STORAGE", "10Gi"),
@@ -83,7 +85,8 @@ K8S_SSL_CONTEXT = ssl.create_default_context(cafile=SERVICEACCOUNT_CA_PATH)
 
 def http_request(url, method="GET", headers=None, body=None, context=None):
     request = urllib.request.Request(url, method=method)
-    for key, value in (headers or {}).items():
+    normalized_headers = dict(headers or {})
+    for key, value in normalized_headers.items():
         request.add_header(key, value)
 
     data = None
@@ -92,7 +95,8 @@ def http_request(url, method="GET", headers=None, body=None, context=None):
             data = body
         else:
             data = json.dumps(body).encode("utf-8")
-            request.add_header("Content-Type", "application/json")
+            if not any(key.lower() == "content-type" for key in normalized_headers):
+                request.add_header("Content-Type", "application/json")
 
     try:
         with urllib.request.urlopen(request, data=data, context=context) as response:
@@ -332,14 +336,14 @@ def run_coder_cli(coder_binary, admin_token, *args):
     return result.stdout
 
 
-def push_template(coder_binary, admin_token):
+def push_template(coder_binary, admin_token, template_dir):
     version_name = f"v-{int(time.time())}"
     cli_args = [
         "templates",
         "push",
         CODER_TEMPLATE_NAME,
         "--directory",
-        CODER_TEMPLATE_DIR,
+        template_dir,
         "--name",
         version_name,
         "--yes",
@@ -382,12 +386,43 @@ def verify_template_dir():
         fail(f"missing mounted template files: {', '.join(missing)}")
 
 
+def stage_template_dir():
+    staged_dir = tempfile.mkdtemp(prefix="coder-template-")
+    required_relative_files = [
+        "main.tf",
+        "README.md",
+        os.path.join("files", "workspace-startup.sh.tftpl"),
+    ]
+
+    for rel_path in required_relative_files:
+        source = os.path.join(CODER_TEMPLATE_DIR, rel_path)
+        destination = os.path.join(staged_dir, rel_path)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copyfile(source, destination, follow_symlinks=True)
+
+    log(f"staged template files into {staged_dir}")
+    for root, _, files in os.walk(staged_dir):
+        for filename in files:
+            path = os.path.join(root, filename)
+            rel_path = os.path.relpath(path, staged_dir)
+            log(f"staged file {rel_path} ({os.path.getsize(path)} bytes)")
+    return staged_dir
+
+
 def main():
+    log("waiting for Coder health endpoint")
     wait_for_coder()
+    log("verifying mounted template files")
     verify_template_dir()
+    log("staging template files from ConfigMap mount")
+    staged_template_dir = stage_template_dir()
+    log("ensuring bootstrap admin token")
     admin_token = ensure_admin_token()
+    log("downloading coder CLI")
     coder_binary = download_coder_cli()
-    push_template(coder_binary, admin_token)
+    log("pushing workspace template")
+    push_template(coder_binary, admin_token, staged_template_dir)
+    log("syncing template id secret")
     sync_template_secret(coder_binary, admin_token)
     log("bootstrap completed successfully")
 

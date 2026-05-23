@@ -28,7 +28,7 @@ if ! docker buildx version >/dev/null 2>&1; then
   exit 1
 fi
 
-GHCR_OWNER="${GHCR_OWNER:-palatynskicloud}"
+GHCR_OWNER="${GHCR_OWNER:-dominikpalatynski}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
 IMAGE_TAG="${IMAGE_TAG:-git-$(git rev-parse --short HEAD)}"
 WORKSPACE_IMAGE_REPOSITORY="${WORKSPACE_IMAGE_REPOSITORY:-ghcr.io/${GHCR_OWNER}/mercato-workspace}"

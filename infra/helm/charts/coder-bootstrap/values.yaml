@@ -27,6 +27,7 @@ generatedSecrets:
 template:
   workspaceNamespace: "mercato-sandboxes"
   workspaceImage: "replace-me-workspace-image"
+  workspaceImagePullSecrets: []
   workspaceStorageClass: "local-path"
   homeStorageSize: "20Gi"
   pgStorageSize: "10Gi"

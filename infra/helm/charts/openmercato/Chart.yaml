@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openmercato
+description: Helm chart for deploying the standalone Open Mercato app with simple PostgreSQL and Redis StatefulSets
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

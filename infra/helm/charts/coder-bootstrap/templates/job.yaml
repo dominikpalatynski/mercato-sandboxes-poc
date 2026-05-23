@@ -8,7 +8,7 @@ metadata:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
-  backoffLimit: 1
+  backoffLimit: 0
   ttlSecondsAfterFinished: 600
   template:
     metadata:
@@ -16,7 +16,7 @@ spec:
         {{- include "coder-bootstrap.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "coder-bootstrap.serviceAccountName" . }}
-      restartPolicy: OnFailure
+      restartPolicy: Never
       containers:
         - name: coder-bootstrap
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -83,6 +83,8 @@ spec:
               value: {{ .Values.template.workspaceNamespace | quote }}
             - name: WORKSPACE_IMAGE
               value: {{ .Values.template.workspaceImage | quote }}
+            - name: WORKSPACE_IMAGE_PULL_SECRETS
+              value: {{ join "," .Values.template.workspaceImagePullSecrets | quote }}
             - name: WORKSPACE_STORAGE_CLASS
               value: {{ .Values.template.workspaceStorageClass | quote }}
             - name: WORKSPACE_HOME_STORAGE

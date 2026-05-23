@@ -60,6 +60,12 @@ variable "workspace_image" {
   description = "Workspace image imported into the local k3d cluster."
 }
 
+variable "workspace_image_pull_secrets" {
+  type        = string
+  default     = ""
+  description = "Comma-separated imagePullSecret names attached to workspace pods for private registry auth."
+}
+
 variable "workspace_storage_class" {
   type        = string
   default     = ""
@@ -146,6 +152,9 @@ locals {
     "coder.workspace_name"      = local.ws_name
     "coder.owner"               = local.owner_name
   })
+  workspace_image_pull_secrets = toset(compact([
+    for value in split(",", var.workspace_image_pull_secrets) : trimspace(value)
+  ]))
   selected_sandbox_preset = local.sandbox_preset_options[data.coder_parameter.sandbox_preset.value]
   agent_init_script       = replace(coder_agent.main.init_script, local.public_coder, local.internal_coder)
   workspace_startup_script = templatefile("${path.module}/files/workspace-startup.sh.tftpl", {
@@ -296,6 +305,13 @@ resource "kubernetes_deployment_v1" "workspace" {
         automount_service_account_token = false
         node_selector = {
           "node-pool" = "sandbox"
+        }
+
+        dynamic "image_pull_secrets" {
+          for_each = local.workspace_image_pull_secrets
+          content {
+            name = image_pull_secrets.value
+          }
         }
 
         init_container {

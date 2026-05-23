@@ -1,3 +1,6 @@
 [submodule "external/hetzner-k3s"]
 	path = external/hetzner-k3s
 	url = https://github.com/vitobotta/hetzner-k3s.git
+[submodule "external/openmercato"]
+	path = external/openmercato
+	url = https://github.com/open-mercato/open-mercato.git

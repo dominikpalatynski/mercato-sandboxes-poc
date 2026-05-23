@@ -7,6 +7,7 @@ path:
 - `coder`
 - `coder-bootstrap`
 - `onboarding`
+- `openmercato`
 
 The recommended cluster bootstrap path for this repo now lives under
 `infra/hetzner-k3s/` and assumes:
@@ -22,6 +23,9 @@ The recommended cluster bootstrap path for this repo now lives under
 - system nodes are labeled with `node-pool=system`
 - the built-in k3s `local-path` provisioner is enabled and available as the
   storage class `local-path`
+  This requires `addons.local_path_storage_class.enabled: true` in the
+  `hetzner-k3s` cluster config because recent `hetzner-k3s` releases do not
+  enable it by default.
 - sandbox nodes do not carry `node-pool=system` and therefore do not receive
   `cert-manager` workloads
 - `postgres-coder` and `postgres-onboarding` are pinned to `node-pool=system`
@@ -85,6 +89,17 @@ $EDITOR infra/manifests/onboarding/onboarding-app-secrets.template.yaml
 kubectl apply -f infra/manifests/onboarding/onboarding-app-secrets.template.yaml
 ```
 
+When the cluster should use the Open Mercato billing bridge, the onboarding
+secret template also needs:
+
+- `OPENMERCATO_API_KEY`
+- `OPENMERCATO_CUSTOMER_TENANT_ID`
+- `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
+- `OPENMERCATO_BILLING_WEBHOOK_SECRET`
+
+`OPENMERCATO_BILLING_WEBHOOK_SECRET` must match the
+`SANDBOX_BILLING_WEBHOOK_SECRET` configured for the `openmercato` Helm release.
+
 6. Create the bootstrap credentials for the first Coder admin user:
 
 ```bash
@@ -97,6 +112,24 @@ repository/tag.
 
 Also update `infra/helm/values/coder-bootstrap.yaml` with the final workspace
 image and any template-specific overrides such as `workspaceStorageClass`.
+
+Also update `infra/helm/values/openmercato.yaml` with the final Open Mercato
+image tag, ingress host, and deployment secrets before installing that release.
+For the sandbox billing bridge, also keep these values aligned:
+
+- `SANDBOX_BILLING_WEBHOOK_URL`
+  This can use the internal onboarding service URL
+  `http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/openmercato/webhook`.
+- `SANDBOX_BILLING_WEBHOOK_SECRET`
+  Must match onboarding's `OPENMERCATO_BILLING_WEBHOOK_SECRET`.
+- `OPENMERCATO_BILLING_BASE_URL` in `infra/helm/values/onboarding.yaml`
+  Must stay on the public Open Mercato ingress host, not the internal service
+  DNS, because hosted checkout URLs derive their origin from the incoming
+  request URL.
+- `OM_SANDBOX_BILLING_ENABLE_MOCK_GATEWAYS=true` and
+  `OM_SANDBOX_BILLING_AUTO_SEED=true`
+  Enable the production-cluster smoke path with the app-local mock provider and
+  idempotent plan seeding.
 
 The GHCR build/push convention and helper scripts live in
 `infra/IMAGES.md`.
@@ -128,7 +161,34 @@ helmfile -f infra/helm/helmfile.yaml -l phase=coder-bootstrap apply
 helmfile -f infra/helm/helmfile.yaml -l phase=onboarding apply
 ```
 
-10. After `cert-manager` is installed, apply the certificate issuers:
+10. Install the standalone Open Mercato release when you want the cluster to
+host a first-party CRM instance next to onboarding:
+
+```bash
+helmfile -f infra/helm/helmfile.yaml -l phase=openmercato apply
+```
+
+11. After the first Open Mercato pod finishes `yarn initialize`, mint a scoped
+billing bridge API key and update the onboarding secret with it:
+
+```bash
+kubectl logs deploy/openmercato -n mercato-sandboxes | grep 'RBAC setup complete'
+kubectl exec -it deploy/openmercato -n mercato-sandboxes -- \
+  sh -lc 'yarn mercato api_keys add --name onboarding-billing --tenantId <tenant-id> --organizationId <org-id>'
+kubectl edit secret onboarding-app-secrets -n mercato-sandboxes
+kubectl rollout restart deployment/onboarding -n mercato-sandboxes
+```
+
+The `kubectl logs` line exposes the tenant/org identifiers created during the
+first `initialize` run. Store the printed API-key secret immediately; Open
+Mercato shows it only once. Write that secret into
+`OPENMERCATO_API_KEY` on `onboarding-app-secrets`, copy the same tenant/org
+identifiers into `OPENMERCATO_CUSTOMER_TENANT_ID` and
+`OPENMERCATO_CUSTOMER_ORGANIZATION_ID`, then restart the onboarding
+deployment so signup and billing CRM sync use the same scoped bridge
+credential.
+
+12. After `cert-manager` is installed, apply the certificate issuers:
 
 ```bash
 kubectl apply -f infra/manifests/cert-manager/clusterissuer-letsencrypt-http.yaml
@@ -164,6 +224,7 @@ kubectl get pods -n mercato-sandboxes -o wide
 kubectl get jobs -n mercato-sandboxes
 kubectl logs job/coder-bootstrap -n mercato-sandboxes
 kubectl get svc,ingress -n mercato-sandboxes
+kubectl get statefulset,pvc -n mercato-sandboxes | grep openmercato
 ```
 
 ## ClusterIssuer

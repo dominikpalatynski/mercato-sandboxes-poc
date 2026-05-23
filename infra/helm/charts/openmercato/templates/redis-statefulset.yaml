@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openmercato.redisName" . }}
+  labels:
+    {{- include "openmercato.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  clusterIP: None
+  selector:
+    {{- include "openmercato.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port }}
+      targetPort: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openmercato.redisReadWriteName" . }}
+  labels:
+    {{- include "openmercato.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  selector:
+    {{- include "openmercato.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port }}
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "openmercato.redisName" . }}
+  labels:
+    {{- include "openmercato.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  serviceName: {{ include "openmercato.redisName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "openmercato.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "openmercato.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.redis.command | nindent 12 }}
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.service.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping
+            periodSeconds: {{ .Values.redis.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.redis.startupProbe.failureThreshold }}
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping
+            periodSeconds: {{ .Values.redis.readinessProbe.periodSeconds }}
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping
+            periodSeconds: {{ .Values.redis.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.redis.livenessProbe.failureThreshold }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "openmercato.labels" . | nindent 10 }}
+          app.kubernetes.io/component: cache
+      spec:
+        accessModes:
+          {{- toYaml .Values.redis.persistence.accessModes | nindent 10 }}
+        {{- with .Values.redis.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.persistence.size }}

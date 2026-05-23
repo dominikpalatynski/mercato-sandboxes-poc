@@ -1,0 +1,89 @@
+# Build and push the app image with:
+# IMAGE_TAG=git-$(git rev-parse --short HEAD)
+# docker buildx build \
+#   --platform linux/amd64 \
+#   -f apps/crm/Dockerfile \
+#   -t ghcr.io/dominikpalatynski/crm:${IMAGE_TAG} \
+#   apps/crm \
+#   --push
+image:
+  repository: ghcr.io/dominikpalatynski/crm
+  tag: v1.2.0
+
+imagePullSecrets:
+  - name: ghcr-pull
+
+app:
+  env:
+    APP_URL: "https://crm.sandbox.palatynskicloud.com"
+    NEXT_PUBLIC_APP_URL: "https://crm.sandbox.palatynskicloud.com"
+    APP_ALLOWED_ORIGINS: "https://crm.sandbox.palatynskicloud.com"
+    SELF_SERVICE_ONBOARDING_ENABLED: "true"
+    DEMO_MODE: "false"
+    UPGRADE_ACTIONS_ENABLED: "false"
+    NEXT_PUBLIC_UPGRADE_ACTIONS_ENABLED: "false"
+    TENANT_DATA_ENCRYPTION: "yes"
+    ENABLE_CRUD_API_CACHE: "true"
+    CACHE_STRATEGY: redis
+    QUEUE_STRATEGY: async
+    NEXT_PUBLIC_QUEUE_STRATEGY: async
+    AUTO_SPAWN_WORKERS: "true"
+    AUTO_SPAWN_SCHEDULER: "true"
+    OM_DISABLE_VECTOR_SEARCH_AUTOINDEXING: "true"
+    OM_AI_PROVIDER: openai
+    OM_AI_MODEL: gpt-5-mini
+    SANDBOX_BILLING_WEBHOOK_URL: "http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/openmercato/webhook"
+    SANDBOX_BILLING_WEBHOOK_TIMEOUT_MS: "15000"
+    OM_SANDBOX_BILLING_ENABLE_MOCK_GATEWAYS: "true"
+    OM_SANDBOX_BILLING_AUTO_SEED: "true"
+    OM_SANDBOX_BILLING_AUTO_SEED_PROVIDER: "mock"
+  secretEnv:
+    jwtSecret: REPLACE_ME_OPENMERCATO_JWT_SECRET
+    authSecret: REPLACE_ME_OPENMERCATO_AUTH_SECRET
+    tenantDataEncryptionFallbackKey: REPLACE_ME_OPENMERCATO_ENCRYPTION_FALLBACK_KEY
+    initSuperadminEmail: admin@example.com
+    initSuperadminPassword: REPLACE_ME_OPENMERCATO_ADMIN_PASSWORD
+    extra:
+      SANDBOX_BILLING_WEBHOOK_SECRET: REPLACE_ME_OPENMERCATO_BILLING_WEBHOOK_SECRET
+      SANDBOX_BILLING_CONTEXT_SECRET: REPLACE_ME_OPENMERCATO_BILLING_CONTEXT_SECRET
+      MOCK_GATEWAY_WEBHOOK_SECRET: REPLACE_ME_OPENMERCATO_MOCK_GATEWAY_WEBHOOK_SECRET
+  extraSecretEnv:
+    - name: SANDBOX_BILLING_WEBHOOK_SECRET
+      secretKey: SANDBOX_BILLING_WEBHOOK_SECRET
+    - name: SANDBOX_BILLING_CONTEXT_SECRET
+      secretKey: SANDBOX_BILLING_CONTEXT_SECRET
+    - name: MOCK_GATEWAY_WEBHOOK_SECRET
+      secretKey: MOCK_GATEWAY_WEBHOOK_SECRET
+
+postgres:
+  auth:
+    database: openmercato
+    username: openmercato
+    password: REPLACE_ME_OPENMERCATO_DB_PASSWORD
+
+nodeSelector:
+  node-pool: system
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-http
+  hosts:
+    - host: crm.sandbox.palatynskicloud.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - crm.sandbox.palatynskicloud.com
+      secretName: crm-sandbox-palatynskicloud-tls

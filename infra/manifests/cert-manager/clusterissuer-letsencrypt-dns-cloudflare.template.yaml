@@ -5,7 +5,7 @@ metadata:
   name: letsencrypt-dns
 spec:
   acme:
-    email: twoj-email@example.com
+    email: palatynski.dominik@gmail.com
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
       name: letsencrypt-dns-private-key

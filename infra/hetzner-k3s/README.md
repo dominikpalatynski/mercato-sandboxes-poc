@@ -64,6 +64,10 @@ This keeps the public edge simple:
    $EDITOR infra/hetzner-k3s/cluster.yaml
    ```
 
+   Keep `addons.local_path_storage_class.enabled: true` unless you also change
+   the repo manifests away from `storageClassName: local-path`. Recent
+   `hetzner-k3s` releases keep `local-path` disabled by default.
+
 2. Export the Hetzner token and create the cluster:
 
    ```bash
@@ -125,7 +129,9 @@ This keeps the public edge simple:
 
    Also update `infra/helm/values/coder-bootstrap.yaml` with the final
    workspace image and any template-specific overrides such as the workspace
-   storage class.
+   storage class. If the workspace image is private, create a namespace-local
+   registry secret such as `ghcr-pull` and set
+   `template.workspaceImagePullSecrets` there as well.
 
 8. Create the first-user credentials for Coder bootstrap and install Coder:
 

@@ -36,8 +36,8 @@ This checklist assumes:
 ## 2. External Credentials And Provider Access
 
 - [ ] Hetzner Cloud API token is ready
-- [ ] AWS access key and secret for Route53 are ready
-- [ ] Route53 hosted zone ID for `palatynskicloud.com` is known
+- [ ] Cloudflare API token with DNS edit access for `palatynskicloud.com` is ready
+- [ ] `palatynskicloud.com` DNS zone is managed in Cloudflare
 - [ ] SSH keypair for cluster nodes exists:
   - public key path
   - private key path
@@ -53,6 +53,7 @@ Do not use [cluster.example.yaml](/Users/dpalatynski/Private/OpenMercato/mercato
 - [ ] Replace placeholder IP/CIDRs in `networking.allowed_networks`
 - [ ] Confirm `cluster_name`
 - [ ] Confirm Hetzner location, currently `fsn1`
+- [ ] Set `addons.local_path_storage_class.enabled: true`
 
 Recommended minimum for a first real deployment:
 
@@ -124,6 +125,10 @@ Follow [infra/IMAGES.md](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxe
 
 - [ ] Update workspace image ref in
   [infra/helm/values/coder-bootstrap.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/helm/values/coder-bootstrap.yaml:27)
+- [ ] If the workspace image is private, create the `ghcr-pull` registry
+  Secret in `mercato-sandboxes` and set
+  `template.workspaceImagePullSecrets` in
+  [infra/helm/values/coder-bootstrap.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/helm/values/coder-bootstrap.yaml:27)
 - [ ] Update onboarding image repository and tag in
   [infra/helm/values/onboarding.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/helm/values/onboarding.yaml:1)
 
@@ -143,6 +148,7 @@ Pay special attention to:
 - `CODER_PUBLIC_URL`
 - `WILDCARD_APPS_DOMAIN`
 - `template.workspaceStorageClass`
+- `template.workspaceImagePullSecrets` when the workspace image is private
 
 ## 8. Fill Secret Templates
 
@@ -164,11 +170,11 @@ Pay special attention to:
 - [ ] Confirm `POSTGRES_URL` still targets
   `postgres-onboarding-rw.mercato-sandboxes.svc.cluster.local:5432/onboarding`
 
-### Route53 / ACME
+### Cloudflare / ACME
 
-- [ ] Edit [route53-credentials-secret.template.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/manifests/cert-manager/route53-credentials-secret.template.yaml:1)
+- [ ] Edit [cloudflare-api-token-secret.template.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/manifests/cert-manager/cloudflare-api-token-secret.template.yaml:1)
 - [ ] Edit [clusterissuer-letsencrypt-http.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/manifests/cert-manager/clusterissuer-letsencrypt-http.yaml:1)
-- [ ] Edit [clusterissuer-letsencrypt-dns-route53.template.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-route53.template.yaml:1)
+- [ ] Edit [clusterissuer-letsencrypt-dns-cloudflare.template.yaml](/Users/dpalatynski/Private/OpenMercato/mercato-sandboxes-poc/infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-cloudflare.template.yaml:1)
 
 ## 9. Create The Cluster
 
@@ -347,16 +353,16 @@ Secret alone is not enough once the data directory already exists.
   kubectl apply -f infra/manifests/cert-manager/clusterissuer-letsencrypt-http.yaml
   ```
 
-- [ ] Apply Route53 credentials:
+- [ ] Apply Cloudflare API token secret:
 
   ```bash
-  kubectl apply -f infra/manifests/cert-manager/route53-credentials-secret.template.yaml
+  kubectl apply -f infra/manifests/cert-manager/cloudflare-api-token-secret.template.yaml
   ```
 
 - [ ] Apply wildcard DNS issuer:
 
   ```bash
-  kubectl apply -f infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-route53.template.yaml
+  kubectl apply -f infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-cloudflare.template.yaml
   ```
 
 - [ ] Apply Coder wildcard ingress:

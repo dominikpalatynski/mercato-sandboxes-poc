@@ -1,0 +1,103 @@
+name: Build CRM Image
+
+on:
+  pull_request:
+    paths:
+      - "apps/crm/**"
+      - ".github/workflows/build-crm-image.yml"
+  push:
+    tags:
+      - "crm-v*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional additional tag, for example v1.2.0"
+        required: false
+        type: string
+      image_repository:
+        description: "Target GHCR repository"
+        required: false
+        default: "ghcr.io/dominikpalatynski/crm"
+        type: string
+
+env:
+  DEFAULT_IMAGE_REPOSITORY: ghcr.io/dominikpalatynski/crm
+
+jobs:
+  build:
+    name: Build apps/crm image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: build-crm-image-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image repository and tags
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          input_image_tag="$(jq -r '.inputs.image_tag // ""' "$GITHUB_EVENT_PATH")"
+          input_image_repository="$(jq -r '.inputs.image_repository // ""' "$GITHUB_EVENT_PATH")"
+
+          image_repository="${input_image_repository:-$DEFAULT_IMAGE_REPOSITORY}"
+          short_sha="$(git rev-parse --short HEAD)"
+          tag_list="${image_repository}:git-${short_sha}"
+
+          if [ -n "$input_image_tag" ]; then
+            tag_list="${tag_list},${image_repository}:${input_image_tag}"
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            release_tag="${GITHUB_REF_NAME#crm-}"
+            tag_list="${tag_list},${image_repository}:${release_tag}"
+          fi
+
+          {
+            echo "image_repository=$image_repository"
+            echo "tags=$tag_list"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || github.token }}
+
+      - name: Build and optionally push image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/crm
+          file: apps/crm/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.vars.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=crm-image
+          cache-to: type=gha,mode=max,scope=crm-image
+
+      - name: Write workflow summary
+        shell: bash
+        run: |
+          {
+            echo "### CRM image build"
+            echo
+            echo "- repository: \`${{ steps.vars.outputs.image_repository }}\`"
+            echo "- tags: \`${{ steps.vars.outputs.tags }}\`"
+            echo "- push: \`${{ github.event_name != 'pull_request' }}\`"
+            echo "- dockerfile: \`apps/crm/Dockerfile\`"
+            echo "- platform: \`linux/amd64\`"
+          } >> "$GITHUB_STEP_SUMMARY"

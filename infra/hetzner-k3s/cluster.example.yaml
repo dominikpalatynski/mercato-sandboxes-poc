@@ -59,6 +59,8 @@ worker_node_pools:
         value: sandbox
 
 addons:
+  local_path_storage_class:
+    enabled: true
   csi_driver:
     enabled: false
   cluster_autoscaler:

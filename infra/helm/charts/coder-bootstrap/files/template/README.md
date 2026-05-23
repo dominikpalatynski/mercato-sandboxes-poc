@@ -12,6 +12,7 @@ workspace UX the same while replacing Docker resources with Kubernetes ones.
 - one sidecar PostgreSQL container
 - one PVC mounted at `/home/coder`
 - one PVC mounted for PostgreSQL data
+- optional pod-level `imagePullSecrets` for private workspace registries
 
 ## Behavior
 

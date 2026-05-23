@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openmercato.fullname" . }}
+  labels:
+    {{- include "openmercato.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 2
+  strategy:
+    type: {{ .Values.app.deploymentStrategy.type }}
+  selector:
+    matchLabels:
+      {{- include "openmercato.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "openmercato.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+        {{- with .Values.app.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.app.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h {{ include "openmercato.postgresReadWriteName" . }} -p {{ .Values.postgres.service.port }} -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                sleep 2
+              done
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.postgresSecretName" . }}
+                  key: username
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
+        - name: wait-for-redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until redis-cli -h {{ include "openmercato.redisReadWriteName" . }} -p {{ .Values.redis.service.port }} ping >/dev/null 2>&1; do
+                sleep 2
+              done
+      containers:
+        - name: openmercato
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.app.securityContext | nindent 12 }}
+          command:
+            {{- toYaml .Values.app.command | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.containerPort }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.app.containerPort | quote }}
+            {{- range $name, $value := .Values.app.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: REDIS_URL
+            - name: QUEUE_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: QUEUE_REDIS_URL
+            - name: CACHE_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: CACHE_REDIS_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: JWT_SECRET
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: AUTH_SECRET
+            - name: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+            - name: OM_INIT_SUPERADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: OM_INIT_SUPERADMIN_EMAIL
+            - name: OM_INIT_SUPERADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmercato.appSecretName" . }}
+                  key: OM_INIT_SUPERADMIN_PASSWORD
+            {{- range .Values.app.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- range .Values.app.extraSecretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "openmercato.appSecretName" $) .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+          volumeMounts:
+            - name: storage
+              mountPath: {{ .Values.app.storage.mountPath | quote }}
+          startupProbe:
+            {{- toYaml .Values.app.startupProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.app.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.app.livenessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ include "openmercato.storageName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
