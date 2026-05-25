@@ -62,7 +62,7 @@ addons:
   local_path_storage_class:
     enabled: true
   csi_driver:
-    enabled: false
+    enabled: true
   cluster_autoscaler:
     enabled: false
   cloud_controller_manager:

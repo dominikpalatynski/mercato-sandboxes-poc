@@ -8,7 +8,7 @@ coder:
   publicUrl: "https://coder.sandbox.palatynskicloud.com"
   internalUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
   organization: ""
-  cliVersion: "2.30.0"
+  cliVersion: "2.33.2"
   templateName: "mercato-k8s"
   tokenName: "onboarding-app-k8s"
   tokenLifetimeNanoseconds: "31536000000000000"
@@ -27,10 +27,10 @@ generatedSecrets:
 template:
   workspaceNamespace: "mercato-sandboxes"
   # Build/push with: bash scripts/build-and-push-workspace-image.sh
-  workspaceImage: "ghcr.io/dominikpalatynski/mercato-workspace:git-205f910"
+  workspaceImage: "ghcr.io/dominikpalatynski/mercato-workspace:git-c50080e-v2"
   workspaceImagePullSecrets:
     - "ghcr-pull"
-  workspaceStorageClass: "local-path"
+  workspaceStorageClass: "hcloud-volumes"
   homeStorageSize: "20Gi"
   pgStorageSize: "10Gi"
   workspaceNodeOptions: "--max-old-space-size=6144"

@@ -131,7 +131,7 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: local-path
+        storageClassName: hcloud-volumes
         resources:
           requests:
             storage: 10Gi

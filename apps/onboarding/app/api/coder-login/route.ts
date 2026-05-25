@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
+
 import { requireSessionFromRequest } from '@/lib/auth';
 import { coderFetch } from '@/lib/coder';
-import { query } from '@/lib/db';
+import { db } from '@/lib/db';
+import { users } from '@/db/schema';
 
 /**
  * GET /api/coder-login?sandbox_id=<id>&next=<url>
@@ -14,10 +17,6 @@ import { query } from '@/lib/db';
  * This gives "one-click" VS Code / Terminal / Coder dashboard access without
  * showing the Coder login form.
  */
-
-interface UserRow {
-  coder_user_id: string | null;
-}
 
 interface KeyResponse {
   key: string;
@@ -54,12 +53,12 @@ export async function GET(req: Request): Promise<NextResponse> {
   // 3. Look up the Coder user id for the logged-in onboarding user.
   //    We allow any sandbox_id to be passed but only use it for rate-limiting
   //    context — the token is always minted for the owner of the session.
-  const userResult = await query<UserRow>(
-    'SELECT coder_user_id FROM users WHERE id = $1',
-    [session.sub],
-  );
-  const user = userResult.rows[0];
-  if (!user?.coder_user_id) {
+  const [user] = await db
+    .select({ coderUserId: users.coderUserId })
+    .from(users)
+    .where(eq(users.id, session.sub))
+    .limit(1);
+  if (!user?.coderUserId) {
     // User exists but has no Coder account yet — just redirect without cookie.
     return NextResponse.redirect(nextUrl.toString(), 302);
   }
@@ -68,7 +67,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   let coderKey: string;
   try {
     const keyResp = await coderFetch<KeyResponse>(
-      `/api/v2/users/${user.coder_user_id}/keys`,
+      `/api/v2/users/${user.coderUserId}/keys`,
       {
         method: 'POST',
         body: JSON.stringify({ lifetime: TOKEN_LIFETIME_SECONDS }),

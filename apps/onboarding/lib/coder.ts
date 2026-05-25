@@ -300,7 +300,16 @@ export async function upsertUserSecret(user: string, input: UserSecretInput): Pr
 
 interface CreateWorkspaceOptions {
   sandboxPreset: CreatableSandboxPresetId;
+  /**
+   * Name of the Kubernetes Secret the workspace pod should `envFrom` for git
+   * credentials (MERCATO_REPO_URL, MERCATO_REPO_TOKEN, optional
+   * MERCATO_GH_USER_*). The Secret must already exist in the same namespace
+   * as the workspace template's deployments.
+   */
+  workspaceCredsSecretName: string;
 }
+
+const WORKSPACE_CREDS_SECRET_PARAMETER_NAME = 'mercato_creds_secret_name';
 
 export async function createWorkspace(
   coderUserId: string,
@@ -316,6 +325,10 @@ export async function createWorkspace(
         name: SANDBOX_PRESET_PARAMETER_NAME,
         value: options.sandboxPreset,
       },
+      {
+        name: WORKSPACE_CREDS_SECRET_PARAMETER_NAME,
+        value: options.workspaceCredsSecretName,
+      },
     ],
     automatic_updates: 'never',
   };
@@ -324,6 +337,35 @@ export async function createWorkspace(
     { method: 'POST', body: JSON.stringify(body) },
   );
   return { id: created.id };
+}
+
+/**
+ * Restart the workspace by issuing stop → start. Used after the GitHub
+ * handover so the pod re-reads its credentials Secret.
+ */
+export async function restartWorkspace(id: string): Promise<void> {
+  await enqueueWorkspaceTransition(id, 'stop');
+  // Wait briefly for the stop to begin; Coder rejects 'start' until the
+  // previous build is enqueued in a non-pending state. Polling lightly here
+  // keeps the handover snappy without busy-waiting.
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const ws = await coderFetch<{ latest_build?: { transition?: string; job?: { status?: string } } }>(
+        `/api/v2/workspaces/${id}`,
+      );
+      const transition = ws.latest_build?.transition;
+      const status = ws.latest_build?.job?.status;
+      if (transition === 'stop' && (status === 'succeeded' || status === 'failed' || status === 'canceled')) {
+        break;
+      }
+    } catch (e) {
+      if (e instanceof CoderApiError && e.status === 404) return;
+      throw e;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  await enqueueWorkspaceTransition(id, 'start');
 }
 
 interface RawWorkspaceApp {

@@ -227,6 +227,7 @@ test('createWorkspace forwards the selected sandbox preset as a rich parameter',
 
   const workspace = await createWorkspace('coder-user-1', 'classic-demo', {
     sandboxPreset: 'classic',
+    workspaceCredsSecretName: 'mercato-workspace-creds-sandbox-1',
   });
 
   assert.deepEqual(workspace, { id: 'workspace-1' });
@@ -241,6 +242,10 @@ test('createWorkspace forwards the selected sandbox preset as a rich parameter',
         {
           name: 'sandbox_preset',
           value: 'classic',
+        },
+        {
+          name: 'mercato_creds_secret_name',
+          value: 'mercato-workspace-creds-sandbox-1',
         },
       ],
       automatic_updates: 'never',

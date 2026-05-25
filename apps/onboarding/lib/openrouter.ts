@@ -117,7 +117,10 @@ export async function findOpenRouterKeyByName(
 export async function createOpenRouterKey(
   input: CreateOpenRouterKeyInput,
 ): Promise<OpenRouterCreatedKey> {
-  const response = await openRouterFetch<{ data: Record<string, unknown> & { key: unknown } }>(
+  const response = await openRouterFetch<{
+    data: Record<string, unknown> & { key?: unknown };
+    key?: unknown;
+  }>(
     '/keys',
     {
       method: 'POST',
@@ -129,9 +132,24 @@ export async function createOpenRouterKey(
     },
   );
 
+  const key =
+    typeof response.key === 'string'
+      ? response.key
+      : typeof response.data.key === 'string'
+        ? response.data.key
+        : '';
+
+  if (!key) {
+    throw new OpenRouterApiError(
+      502,
+      JSON.stringify(response),
+      'OpenRouter create key response did not include a raw key',
+    );
+  }
+
   return {
     ...mapKeyRecord(response.data),
-    key: String(response.data.key || ''),
+    key,
   };
 }
 

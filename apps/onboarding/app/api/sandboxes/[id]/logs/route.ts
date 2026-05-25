@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { and, eq } from 'drizzle-orm';
+
+import { db } from '@/lib/db';
+import { sandboxes } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
 import {
   getAgentLogs,
@@ -7,11 +10,6 @@ import {
   getWorkspaceStatus,
   type CoderLogLine,
 } from '@/lib/coder';
-
-interface SandboxRow {
-  id: string;
-  coder_workspace_id: string | null;
-}
 
 /**
  * GET /api/sandboxes/{id}/logs?buildAfter=N&agentAfter=M
@@ -42,15 +40,15 @@ export async function GET(
   const buildAfter = Number(url.searchParams.get('buildAfter') ?? '0') || 0;
   const agentAfter = Number(url.searchParams.get('agentAfter') ?? '0') || 0;
 
-  const result = await query<SandboxRow>(
-    'select id, coder_workspace_id from sandboxes where id = $1 and user_id = $2',
-    [id, session.sub],
-  );
-  const sandbox = result.rows[0];
+  const [sandbox] = await db
+    .select({ coderWorkspaceId: sandboxes.coderWorkspaceId })
+    .from(sandboxes)
+    .where(and(eq(sandboxes.id, id), eq(sandboxes.userId, session.sub)))
+    .limit(1);
   if (!sandbox) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  if (!sandbox.coder_workspace_id) {
+  if (!sandbox.coderWorkspaceId) {
     return NextResponse.json({
       buildLogs: [],
       agentLogs: [],
@@ -66,13 +64,12 @@ export async function GET(
   let jobStatus: string | null = null;
   let lifecycleState: string | null = null;
   try {
-    const status = await getWorkspaceStatus(sandbox.coder_workspace_id);
+    const status = await getWorkspaceStatus(sandbox.coderWorkspaceId);
     buildId = status.latestBuildId;
     agentId = status.agentId;
     jobStatus = status.jobStatus;
     lifecycleState = status.lifecycleState;
   } catch {
-    // Best-effort: return empty arrays so the UI keeps polling.
     return NextResponse.json({
       buildLogs: [],
       agentLogs: [],

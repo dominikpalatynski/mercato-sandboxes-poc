@@ -126,14 +126,16 @@ data "coder_parameter" "sandbox_preset" {
 }
 
 locals {
-  ws_name        = lower(data.coder_workspace.me.name)
-  owner_name     = lower(data.coder_workspace_owner.me.name)
-  id_suffix      = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
-  name_prefix    = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
-  deployment     = "${local.name_prefix}-${local.id_suffix}"
-  home_pvc       = "coder-home-${local.id_suffix}"
-  pg_pvc         = "coder-pg-${local.id_suffix}"
-  app_url        = "${var.proxy_scheme}://3000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
+  ws_name     = lower(data.coder_workspace.me.name)
+  owner_name  = lower(data.coder_workspace_owner.me.name)
+  id_suffix   = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
+  name_prefix = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
+  deployment  = "${local.name_prefix}-${local.id_suffix}"
+  home_pvc    = "coder-home-${local.id_suffix}"
+  pg_pvc      = "coder-pg-${local.id_suffix}"
+  # Coder's subdomain app proxy uses the app slug in the public hostname.
+  # Keep APP_URL aligned with coder_app.app so Next dev HMR trusts this origin.
+  app_url        = "${var.proxy_scheme}://app--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
   public_coder   = trimsuffix(var.coder_public_url, "/")
   internal_coder = trimsuffix(var.agent_coder_url, "/")
   selector_labels = {

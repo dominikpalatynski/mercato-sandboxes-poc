@@ -8,12 +8,23 @@
 #   --push
 image:
   repository: ghcr.io/dominikpalatynski/crm
-  tag: v1.3.0
+  tag: v1.8.0
 
 imagePullSecrets:
   - name: ghcr-pull
 
 app:
+  command:
+    - /bin/sh
+    - -lc
+    - |
+      set -e
+      MERCATO="node /app/node_modules/@open-mercato/cli/bin/mercato"
+      INIT_MARKER_FILE="/app/storage/.initialized" \
+      INIT_COMMAND="$MERCATO init" \
+      MIGRATE_COMMAND="$MERCATO db migrate" \
+      sh /app/docker/scripts/init-or-migrate.sh
+      exec $MERCATO server start
   env:
     APP_URL: "https://crm.sandbox.palatynskicloud.com"
     NEXT_PUBLIC_APP_URL: "https://crm.sandbox.palatynskicloud.com"
@@ -32,12 +43,14 @@ app:
     OM_DISABLE_VECTOR_SEARCH_AUTOINDEXING: "true"
     OM_AI_PROVIDER: openai
     OM_AI_MODEL: gpt-5-mini
+    ONBOARDING_WEBHOOK_URL: "http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/om/webhook"
+    ONBOARDING_WEBHOOK_PRODUCT_CODE: "basic-sandbox"
     SANDBOX_BILLING_WEBHOOK_URL: "http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/openmercato/webhook"
     SANDBOX_BILLING_WEBHOOK_TIMEOUT_MS: "15000"
     OM_SANDBOX_BILLING_ENABLE_MOCK_GATEWAYS: "true"
     OM_SANDBOX_BILLING_AUTO_SEED: "true"
     OM_SANDBOX_BILLING_AUTO_SEED_PROVIDER: "mock"
-    OM_SUBSCRIPTIONS_PLANS_FILE=/absolute/path/to/your-app/config/subscriptions/plans.ts
+    OM_SUBSCRIPTIONS_PLANS_FILE: "/app/src/plans.ts"
   secretEnv:
     jwtSecret: REPLACE_ME_OPENMERCATO_JWT_SECRET
     authSecret: REPLACE_ME_OPENMERCATO_AUTH_SECRET
@@ -50,6 +63,8 @@ app:
       MOCK_GATEWAY_WEBHOOK_SECRET: REPLACE_ME_OPENMERCATO_MOCK_GATEWAY_WEBHOOK_SECRET
   extraSecretEnv:
     - name: SANDBOX_BILLING_WEBHOOK_SECRET
+      secretKey: SANDBOX_BILLING_WEBHOOK_SECRET
+    - name: ONBOARDING_WEBHOOK_SECRET
       secretKey: SANDBOX_BILLING_WEBHOOK_SECRET
     - name: SANDBOX_BILLING_CONTEXT_SECRET
       secretKey: SANDBOX_BILLING_CONTEXT_SECRET

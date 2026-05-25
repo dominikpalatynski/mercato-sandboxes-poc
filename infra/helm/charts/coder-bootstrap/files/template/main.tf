@@ -132,15 +132,35 @@ data "coder_parameter" "sandbox_preset" {
   }
 }
 
+# Name of the Kubernetes Secret that the onboarding service pre-creates per
+# sandbox. The Secret holds:
+#   - MERCATO_REPO_URL    (Gitea HTTPS clone URL with embedded credentials)
+#   - MERCATO_REPO_TOKEN  (raw Gitea deploy token, used by the credential helper)
+#   - MERCATO_GH_USER_NAME / MERCATO_GH_USER_EMAIL (optional Co-Authored-By hints)
+#   - OPENROUTER_API_KEY / ANTHROPIC_AUTH_TOKEN (patched by billing sync)
+# The workspace container picks them up via envFrom and the startup script
+# uses them to bootstrap or pull the project.
+data "coder_parameter" "mercato_creds_secret_name" {
+  name         = "mercato_creds_secret_name"
+  display_name = "Mercato workspace credentials Secret"
+  description  = "Internal: name of the per-sandbox K8s Secret that holds git origin + deploy token."
+  type         = "string"
+  mutable      = true
+  default      = ""
+  order        = 99
+}
+
 locals {
-  ws_name        = lower(data.coder_workspace.me.name)
-  owner_name     = lower(data.coder_workspace_owner.me.name)
-  id_suffix      = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
-  name_prefix    = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
-  deployment     = "${local.name_prefix}-${local.id_suffix}"
-  home_pvc       = "coder-home-${local.id_suffix}"
-  pg_pvc         = "coder-pg-${local.id_suffix}"
-  app_url        = "${var.proxy_scheme}://3000--main--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
+  ws_name     = lower(data.coder_workspace.me.name)
+  owner_name  = lower(data.coder_workspace_owner.me.name)
+  id_suffix   = substr(replace(data.coder_workspace.me.id, "-", ""), 0, 8)
+  name_prefix = "coder-${substr(local.owner_name, 0, 20)}-${substr(local.ws_name, 0, 20)}"
+  deployment  = "${local.name_prefix}-${local.id_suffix}"
+  home_pvc    = "coder-home-${local.id_suffix}"
+  pg_pvc      = "coder-pg-${local.id_suffix}"
+  # Coder's subdomain app proxy uses the app slug in the public hostname.
+  # Keep APP_URL aligned with coder_app.app so Next dev HMR trusts this origin.
+  app_url        = "${var.proxy_scheme}://app--${local.ws_name}--${local.owner_name}.${var.wildcard_apps_domain}${var.proxy_port_suffix}"
   public_coder   = trimsuffix(var.coder_public_url, "/")
   internal_coder = trimsuffix(var.agent_coder_url, "/")
   selector_labels = {
@@ -345,6 +365,22 @@ resource "kubernetes_deployment_v1" "workspace" {
             run_as_user                = 1000
             run_as_group               = 1000
             allow_privilege_escalation = false
+          }
+
+          # MERCATO_REPO_URL, MERCATO_REPO_TOKEN, MERCATO_GH_USER_* and
+          # billing-managed LLM env vars live in a
+          # per-sandbox Secret pre-created by onboarding. The Secret is
+          # optional so a workspace that booted before the secret existed
+          # (or for manual debugging) still starts; the startup script
+          # short-circuits when the envs are missing.
+          dynamic "env_from" {
+            for_each = data.coder_parameter.mercato_creds_secret_name.value != "" ? [data.coder_parameter.mercato_creds_secret_name.value] : []
+            content {
+              secret_ref {
+                name     = env_from.value
+                optional = true
+              }
+            }
           }
 
           env {

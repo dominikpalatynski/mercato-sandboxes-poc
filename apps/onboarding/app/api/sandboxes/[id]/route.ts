@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { and, eq } from 'drizzle-orm';
+
+import { db } from '@/lib/db';
+import { sandboxes } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { deleteWorkspace } from '@/lib/coder';
+import { deleteWorkspaceCredsSecret } from '@/lib/k8s/workspace-secrets';
 
 export async function DELETE(
   req: Request,
@@ -16,24 +20,29 @@ export async function DELETE(
   }
   const { id } = await ctx.params;
 
-  const result = await query<{ id: string; coder_workspace_id: string | null }>(
-    'select id, coder_workspace_id from sandboxes where id = $1 and user_id = $2',
-    [id, session.sub],
-  );
-  const sandbox = result.rows[0];
+  const [sandbox] = await db
+    .select({ id: sandboxes.id, coderWorkspaceId: sandboxes.coderWorkspaceId })
+    .from(sandboxes)
+    .where(and(eq(sandboxes.id, id), eq(sandboxes.userId, session.sub)))
+    .limit(1);
   if (!sandbox) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  if (sandbox.coder_workspace_id) {
+  if (sandbox.coderWorkspaceId) {
     try {
-      await deleteWorkspace(sandbox.coder_workspace_id);
+      await deleteWorkspace(sandbox.coderWorkspaceId);
     } catch (e) {
-      // Non-fatal: workspace may already be gone or in a bad state.
-      console.warn(`[delete] coder workspace ${sandbox.coder_workspace_id}:`, String(e).slice(0, 300));
+      console.warn(`[delete] coder workspace ${sandbox.coderWorkspaceId}:`, String(e).slice(0, 300));
     }
   }
 
-  await query('delete from sandboxes where id = $1', [sandbox.id]);
+  try {
+    await deleteWorkspaceCredsSecret(sandbox.id);
+  } catch (e) {
+    console.warn(`[delete] workspace creds Secret for ${sandbox.id}:`, String(e).slice(0, 300));
+  }
+
+  await db.delete(sandboxes).where(eq(sandboxes.id, sandbox.id));
   return new NextResponse(null, { status: 204 });
 }

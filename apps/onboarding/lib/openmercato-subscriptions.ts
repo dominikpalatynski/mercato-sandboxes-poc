@@ -25,6 +25,15 @@ export interface CreateSubscriptionCheckoutResponse {
   subscriptionRequestId: string;
 }
 
+export interface CreateSubscriptionPortalInput {
+  externalAccountId: string;
+  returnUrl: string;
+}
+
+export interface CreateSubscriptionPortalResponse {
+  portalUrl: string;
+}
+
 export interface SubscriptionAccessSnapshot {
   subscriptionId: string | null;
   externalAccountId: string;
@@ -67,6 +76,20 @@ export async function createSubscriptionCheckout(
       successUrl: input.successUrl,
       cancelUrl: input.cancelUrl,
       ...(input.metadata ? { metadata: input.metadata } : {}),
+    },
+  );
+}
+
+export async function createSubscriptionPortal(
+  input: CreateSubscriptionPortalInput,
+  deps: OpenMercatoSubscriptionsClientDependencies = {},
+): Promise<CreateSubscriptionPortalResponse> {
+  const client = resolveClient(deps);
+  return client.post<CreateSubscriptionPortalResponse, Record<string, unknown>>(
+    '/api/subscriptions/portal',
+    {
+      externalAccountId: input.externalAccountId,
+      returnUrl: input.returnUrl,
     },
   );
 }

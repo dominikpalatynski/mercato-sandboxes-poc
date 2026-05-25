@@ -1,0 +1,18 @@
+# Consumed by the Gitea Helm chart via gitea.additionalConfigFromEnvs in
+# infra/helm/values/gitea.yaml. Only PASSWD lives here so the value can be
+# rotated without bumping values.yaml. HOST/NAME/USER are static and live in
+# values.yaml directly.
+#
+# The password MUST match the `password` key in
+# infra/manifests/postgres/postgres-gitea-app-secret.template.yaml. The
+# operator is expected to keep them aligned manually.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitea-db-url
+  namespace: gitea
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+type: Opaque
+stringData:
+  password: REPLACE_ME_GITEA_DB_PASSWORD

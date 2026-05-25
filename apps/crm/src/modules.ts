@@ -23,6 +23,7 @@ export const enabledModules: ModuleEntry[] = [
   { id: 'api_keys', from: '@open-mercato/core' },
   { id: 'subscriptions', from: '@open-mercato/core' },
   { id: 'payment_gateways', from: '@open-mercato/core' },
+  { id: 'integrations', from: '@open-mercato/core' },
   { id: 'gateway_stripe', from: '@open-mercato/gateway-stripe' },
   { id: 'onboarding_bridge', from: '@app' },
 ]

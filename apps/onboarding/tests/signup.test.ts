@@ -1,37 +1,44 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { QueryResult, QueryResultRow } from 'pg';
 
-import { registerUser, SignupError } from '../lib/signup';
+import { registerUser, SignupError, type SignupRepository } from '../lib/signup';
 
-function result<T extends QueryResultRow>(rows: T[], rowCount = rows.length): QueryResult<T> {
-  return {
-    command: 'SELECT',
-    fields: [],
-    oid: 0,
-    rowCount,
-    rows,
-  };
+interface InsertedUserCall {
+  email: string;
+  passwordHash: string;
+  firstName: string;
+  lastName: string;
+  companyName: string | null;
+  crmEntityId: string | null;
+  crmPersonId: string | null;
 }
 
-function normalizeSql(sql: string): string {
-  return sql.replace(/\s+/g, ' ').trim().toLowerCase();
+function makeRepo(overrides: Partial<SignupRepository> = {}): {
+  repo: SignupRepository;
+  inserts: InsertedUserCall[];
+  giteaUpdates: Array<{ userId: string; orgName: string }>;
+} {
+  const inserts: InsertedUserCall[] = [];
+  const giteaUpdates: Array<{ userId: string; orgName: string }> = [];
+  const repo: SignupRepository = {
+    findUserIdByEmail: overrides.findUserIdByEmail ?? (async () => null),
+    insertUser:
+      overrides.insertUser ??
+      (async (input) => {
+        inserts.push(input);
+        return { id: 'user-1', email: input.email };
+      }),
+    setUserGiteaOrg:
+      overrides.setUserGiteaOrg ??
+      (async (userId, orgName) => {
+        giteaUpdates.push({ userId, orgName });
+      }),
+  };
+  return { repo, inserts, giteaUpdates };
 }
 
 test('registerUser stores CRM customer identifiers returned during signup sync', async () => {
-  const inserts: unknown[][] = [];
-
-  const query = async <T extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<QueryResult<T>> => {
-    const text = normalizeSql(sql);
-    if (text === 'select id from users where email = $1') {
-      return result([] as T[], 0);
-    }
-    if (text.startsWith('insert into users (')) {
-      inserts.push(params);
-      return result([{ id: 'user-1', email: 'owner@example.com' } as T], 1);
-    }
-    throw new Error(`Unexpected SQL: ${sql}`);
-  };
+  const { repo, inserts } = makeRepo();
 
   const created = await registerUser(
     {
@@ -42,7 +49,7 @@ test('registerUser stores CRM customer identifiers returned during signup sync',
       companyName: 'Analytical Engines',
     },
     {
-      query,
+      repository: repo,
       hashPassword: async () => 'hashed-password',
       signSession: async () => 'session-token',
       syncOpenMercatoSignupCustomer: async () => ({
@@ -50,6 +57,7 @@ test('registerUser stores CRM customer identifiers returned during signup sync',
         personId: 'person-1',
         created: true,
       }),
+      createUserOrg: async () => ({ name: 'user-test', id: 1 }),
     },
   );
 
@@ -57,31 +65,19 @@ test('registerUser stores CRM customer identifiers returned during signup sync',
   assert.equal(created.sessionToken, 'session-token');
   assert.equal(created.openMercatoCustomerEntityId, 'entity-1');
   assert.equal(created.openMercatoCustomerPersonId, 'person-1');
-  assert.deepEqual(inserts[0], [
-    'owner@example.com',
-    'hashed-password',
-    'Ada',
-    'Lovelace',
-    'Analytical Engines',
-    'entity-1',
-    'person-1',
-  ]);
+  assert.deepEqual(inserts[0], {
+    email: 'owner@example.com',
+    passwordHash: 'hashed-password',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    companyName: 'Analytical Engines',
+    crmEntityId: 'entity-1',
+    crmPersonId: 'person-1',
+  });
 });
 
 test('registerUser allows signup without CRM sync when the feature is not configured', async () => {
-  const inserts: unknown[][] = [];
-
-  const query = async <T extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<QueryResult<T>> => {
-    const text = normalizeSql(sql);
-    if (text === 'select id from users where email = $1') {
-      return result([] as T[], 0);
-    }
-    if (text.startsWith('insert into users (')) {
-      inserts.push(params);
-      return result([{ id: 'user-2', email: 'owner@example.com' } as T], 1);
-    }
-    throw new Error(`Unexpected SQL: ${sql}`);
-  };
+  const { repo, inserts } = makeRepo();
 
   const created = await registerUser(
     {
@@ -92,31 +88,32 @@ test('registerUser allows signup without CRM sync when the feature is not config
       companyName: null,
     },
     {
-      query,
+      repository: repo,
       hashPassword: async () => 'hashed-password',
       signSession: async () => 'session-token',
       syncOpenMercatoSignupCustomer: async () => null,
+      createUserOrg: async () => ({ name: 'user-test', id: 1 }),
     },
   );
 
   assert.equal(created.openMercatoCustomerEntityId, null);
   assert.equal(created.openMercatoCustomerPersonId, null);
-  assert.deepEqual(inserts[0], [
-    'owner@example.com',
-    'hashed-password',
-    'Ada',
-    'Lovelace',
-    null,
-    null,
-    null,
-  ]);
+  assert.deepEqual(inserts[0], {
+    email: 'owner@example.com',
+    passwordHash: 'hashed-password',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    companyName: null,
+    crmEntityId: null,
+    crmPersonId: null,
+  });
 });
 
 test('registerUser rejects duplicate emails before attempting CRM sync', async () => {
   let syncCalls = 0;
-
-  const query = async <T extends QueryResultRow>(): Promise<QueryResult<T>> =>
-    result([{ id: 'user-existing' } as T], 1);
+  const { repo } = makeRepo({
+    findUserIdByEmail: async () => 'user-existing',
+  });
 
   await assert.rejects(
     () =>
@@ -129,7 +126,7 @@ test('registerUser rejects duplicate emails before attempting CRM sync', async (
           companyName: null,
         },
         {
-          query,
+          repository: repo,
           syncOpenMercatoSignupCustomer: async () => {
             syncCalls += 1;
             return null;
@@ -148,15 +145,12 @@ test('registerUser rejects duplicate emails before attempting CRM sync', async (
 
 test('registerUser surfaces CRM sync failures as signup dependency errors', async () => {
   let insertCalled = false;
-
-  const query = async <T extends QueryResultRow>(sql: string): Promise<QueryResult<T>> => {
-    const text = normalizeSql(sql);
-    if (text === 'select id from users where email = $1') {
-      return result([] as T[], 0);
-    }
-    insertCalled = true;
-    throw new Error('insert should not be reached when CRM sync fails');
-  };
+  const { repo } = makeRepo({
+    insertUser: async (input) => {
+      insertCalled = true;
+      return { id: 'user-x', email: input.email };
+    },
+  });
 
   await assert.rejects(
     () =>
@@ -169,7 +163,7 @@ test('registerUser surfaces CRM sync failures as signup dependency errors', asyn
           companyName: null,
         },
         {
-          query,
+          repository: repo,
           syncOpenMercatoSignupCustomer: async () => {
             throw new Error('crm unavailable');
           },

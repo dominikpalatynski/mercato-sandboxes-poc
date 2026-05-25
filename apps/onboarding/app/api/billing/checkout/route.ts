@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { requireSessionFromRequest } from '@/lib/auth';
 import { OmBillingError, startSubscriptionCheckout } from '@/lib/om-billing';
+import { resolvePublicBaseUrl } from '@/lib/public-url';
 
 const Body = z.object({
   price_code: z.string().min(1).max(128).optional(),
@@ -37,7 +38,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   try {
     const result = await startSubscriptionCheckout({
       userId: session.sub,
-      baseUrl: req.url,
+      baseUrl: resolvePublicBaseUrl(req),
       priceCode: parsed.data.price_code,
     });
     return NextResponse.json(

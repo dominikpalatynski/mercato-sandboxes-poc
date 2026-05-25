@@ -53,6 +53,10 @@ export default function NewSandboxForm({
       if (!res.ok) {
         if (data.code === 'ai_entitlement_required') {
           setError('Activate paid AI access on the dashboard before creating a sandbox.');
+        } else if (data.code === 'sandbox_limit_reached') {
+          setError('Your current plan sandbox limit is reached. Delete an existing sandbox or update the subscription.');
+        } else if (data.code === 'sandbox_quota_unavailable') {
+          setError('Your current plan does not expose a valid sandbox limit. Open billing and refresh your subscription access.');
         } else {
           setError(data.error || `HTTP ${res.status}`);
         }

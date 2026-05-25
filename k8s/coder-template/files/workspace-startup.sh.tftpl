@@ -1,3 +1,4 @@
+# Keep this file in sync with k8s/coder-template/files/workspace-startup.sh.tftpl.
 set -e
 
 code-server --auth none --trusted-origins '*' --bind-addr 0.0.0.0:13337 >/tmp/code-server.log 2>&1 &
@@ -9,6 +10,113 @@ sandbox_preset_name="${sandbox_preset_name}"
 bootstrap_command='${bootstrap_command}'
 app_url='${app_url}'
 database_host='${database_host}'
+
+# --- Git identity + repo plumbing ----------------------------------------
+#
+# The workspace pod receives these via `envFrom` on a per-sandbox Secret
+# managed by onboarding:
+#   MERCATO_REPO_URL    Gitea HTTPS clone URL with embedded credentials
+#                        (e.g. https://user-<id>:<token>@gitea.sandbox.../repo.git)
+#   MERCATO_REPO_TOKEN  Raw Gitea deploy token, used by the credential helper
+#   MERCATO_GH_USER_NAME, MERCATO_GH_USER_EMAIL
+#                        Optional Co-Authored-By hints set after a user links
+#                        their GitHub account.
+#
+# We configure a single bot identity (`mercato-agent`) so commits from
+# Codex/Claude/etc. all attribute to the same author. When MERCATO_GH_USER_*
+# is set, a commit-msg hook appends a Co-Authored-By trailer to credit the
+# real user.
+
+configure_git_identity() {
+  git config --global user.name "mercato-agent"
+  git config --global user.email "agent@palatynskicloud.com"
+  git config --global init.defaultBranch main
+  git config --global pull.rebase false
+
+  if [ -n "$MERCATO_REPO_TOKEN" ]; then
+    # Fallback credential helper for any operation that strips creds from
+    # the remote URL (e.g. `git remote set-url` without embedded auth).
+    git config --global credential.helper '!f() { echo username=mercato-agent; echo password=$MERCATO_REPO_TOKEN; }; f'
+  fi
+}
+
+install_commit_msg_hook() {
+  repo_dir="$1"
+  hook_path="$repo_dir/.git/hooks/commit-msg"
+  if [ ! -d "$repo_dir/.git" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$hook_path")"
+  cat > "$hook_path" <<'HOOK'
+#!/bin/sh
+# mercato-agent: append Co-Authored-By for the real user when set.
+set -e
+msg_file="$1"
+[ -n "$MERCATO_GH_USER_NAME" ] || exit 0
+[ -n "$MERCATO_GH_USER_EMAIL" ] || exit 0
+trailer="Co-Authored-By: $MERCATO_GH_USER_NAME <$MERCATO_GH_USER_EMAIL>"
+if grep -qF "$trailer" "$msg_file"; then
+  exit 0
+fi
+# Ensure a blank line before the trailer block per git trailer conventions.
+if [ -s "$msg_file" ]; then
+  tail -c1 "$msg_file" | od -An -c | grep -q '\\n' || echo "" >> "$msg_file"
+  echo "" >> "$msg_file"
+fi
+echo "$trailer" >> "$msg_file"
+HOOK
+  chmod +x "$hook_path"
+}
+
+clone_or_init_project() {
+  target_dir="$HOME/app"
+  if [ -d "$target_dir/.git" ]; then
+    # Resumed workspace — pull latest in case migration to GitHub or a manual
+    # push happened while the workspace was down. Best-effort.
+    (cd "$target_dir" && git pull --ff-only) >>/tmp/mercato-git.log 2>&1 || true
+    install_commit_msg_hook "$target_dir"
+    return 0
+  fi
+
+  if [ -z "$MERCATO_REPO_URL" ]; then
+    echo "[sandbox] MERCATO_REPO_URL not set; skipping git clone" >>/tmp/mercato-git.log
+    return 0
+  fi
+
+  echo "[sandbox] cloning $MERCATO_REPO_URL into $target_dir" >>/tmp/mercato-git.log
+  if git clone "$MERCATO_REPO_URL" "$target_dir" >>/tmp/mercato-git.log 2>&1; then
+    install_commit_msg_hook "$target_dir"
+    return 0
+  fi
+
+  # Clone failed (network blip or repo doesn't exist yet) — fall back to a
+  # local repo so the workspace can still boot. The Gitea-side mirror can be
+  # populated later by the user via `git push -u origin main`.
+  echo "[sandbox] clone failed; initializing local repo" >>/tmp/mercato-git.log
+  mkdir -p "$target_dir"
+  (cd "$target_dir" && git init -q && [ -n "$MERCATO_REPO_URL" ] && git remote add origin "$MERCATO_REPO_URL") >>/tmp/mercato-git.log 2>&1 || true
+  install_commit_msg_hook "$target_dir"
+}
+
+push_bootstrapped_repo() {
+  target_dir="$HOME/app"
+  [ -d "$target_dir/.git" ] || return 0
+  [ -n "$MERCATO_REPO_URL" ] || return 0
+
+  (
+    cd "$target_dir"
+    if [ -z "$(git status --porcelain)" ] && git rev-parse HEAD >/dev/null 2>&1; then
+      return 0
+    fi
+    git add -A
+    if git diff --cached --quiet; then
+      return 0
+    fi
+    git commit -m "Mercato bootstrap ($sandbox_preset)" >/dev/null 2>&1 || true
+    git branch -M main >/dev/null 2>&1 || true
+    git push -u origin main >>/tmp/mercato-git.log 2>&1 || true
+  )
+}
 
 ensure_env_value() {
   key="$1"
@@ -42,7 +150,23 @@ EOF
 bootstrap_open_mercato_workspace() {
   cd "$HOME"
   echo "[sandbox] bootstrapping preset $sandbox_preset ($sandbox_preset_name) via: $bootstrap_command" >> /tmp/mercato-dev.log
-  sh -lc "$bootstrap_command"
+
+  # If $HOME/app already exists (typical: we just cloned the Gitea repo
+  # which has only an auto-generated README), bootstrap into a temp dir and
+  # sync files in so the existing .git is preserved.
+  if [ -d "$HOME/app" ]; then
+    tmp_dir="$HOME/.mercato-bootstrap-tmp"
+    rm -rf "$tmp_dir"
+    mkdir -p "$tmp_dir"
+    (cd "$tmp_dir" && sh -lc "$bootstrap_command")
+    if [ -d "$tmp_dir/app" ]; then
+      # Copy bootstrapped files in; -n keeps the cloned README if present.
+      (cd "$tmp_dir/app" && tar cf - . ) | (cd "$HOME/app" && tar xf -)
+    fi
+    rm -rf "$tmp_dir"
+  else
+    sh -lc "$bootstrap_command"
+  fi
 
   cd "$HOME/app"
   if [ ! -f .env ] && [ -f .env.example ]; then
@@ -149,11 +273,14 @@ launch_open_mercato_runtime() {
 }
 
 configure_codex_profile
+configure_git_identity
+clone_or_init_project
 
-if [ ! -d "$HOME/app" ]; then
+if [ ! -f "$HOME/app/package.json" ]; then
   workspace_start_mode="bootstrap"
   dev_command="yarn setup"
   bootstrap_open_mercato_workspace
+  push_bootstrapped_repo
 fi
 
 patch_open_mercato_dev_files

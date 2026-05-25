@@ -1,0 +1,118 @@
+# Gitea is the default origin for user code in Mercato sandboxes. Workspace
+# pods git push to a per-user org here. When a user later links GitHub, the
+# repo is mirrored over and the workspace switches its origin to GitHub.
+#
+# Storage:
+# - gitea repo data and avatars on hcloud-volumes (durable)
+# - PostgreSQL externalised to postgres-gitea in mercato-sandboxes
+# - SSH is intentionally NOT exposed publicly in MVP — push over HTTPS only
+persistence:
+  enabled: true
+  storageClass: hcloud-volumes
+  size: 50Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Disable the bundled Bitnami PostgreSQL subcharts; we run our own
+# `postgres-gitea` StatefulSet in `mercato-sandboxes` and connect over the
+# cluster DNS name.
+postgresql:
+  enabled: false
+postgresql-ha:
+  enabled: false
+
+# Disable the bundled Bitnami Valkey/Redis subcharts; for the MVP we let
+# Gitea use its in-memory cache and SQLite-backed queue defaults.
+valkey:
+  enabled: false
+valkey-cluster:
+  enabled: false
+redis:
+  enabled: false
+redis-cluster:
+  enabled: false
+
+# Keep SSH internal — push/pull over HTTPS only in MVP.
+service:
+  http:
+    type: ClusterIP
+    port: 3000
+  ssh:
+    type: ClusterIP
+    port: 22
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns
+  hosts:
+    - host: gitea.sandbox.palatynskicloud.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - gitea.sandbox.palatynskicloud.com
+      secretName: gitea-sandbox-palatynskicloud-tls
+
+nodeSelector:
+  node-pool: system
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+gitea:
+  admin:
+    existingSecret: gitea-admin-credentials
+
+  config:
+    server:
+      DOMAIN: gitea.sandbox.palatynskicloud.com
+      ROOT_URL: https://gitea.sandbox.palatynskicloud.com/
+      SSH_DOMAIN: gitea.sandbox.palatynskicloud.com
+      DISABLE_SSH: true
+      START_SSH_SERVER: false
+    database:
+      DB_TYPE: postgres
+      HOST: postgres-gitea-rw.mercato-sandboxes.svc.cluster.local:5432
+      NAME: gitea
+      USER: gitea
+      SSL_MODE: disable
+    service:
+      DISABLE_REGISTRATION: true
+      REQUIRE_SIGNIN_VIEW: true
+      ENABLE_NOTIFY_MAIL: false
+    repository:
+      DEFAULT_PRIVATE: private
+      DEFAULT_PUSH_CREATE_PRIVATE: true
+    cache:
+      ADAPTER: memory
+    session:
+      PROVIDER: memory
+    queue:
+      TYPE: level
+      DATADIR: queues/
+
+  # GITEA__database__PASSWD comes from a separate Secret so the password can
+  # be rotated without bumping values.yaml.
+  additionalConfigFromEnvs:
+    - name: GITEA__database__PASSWD
+      valueFrom:
+        secretKeyRef:
+          name: gitea-db-url
+          key: password

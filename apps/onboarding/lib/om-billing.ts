@@ -1,17 +1,20 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import type { QueryResultRow } from 'pg';
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import {
   ensureCoderUser,
-  upsertUserSecret,
   type CoderUserRef,
 } from '@/lib/coder';
+import { db } from '@/lib/db';
 import {
-  query,
-  withTransaction,
-  type DatabaseQueryable,
-} from '@/lib/db';
+  billingEvents,
+  billingOrders,
+  llmAccounts,
+  llmUsageSnapshots,
+  sandboxes,
+  users,
+} from '@/db/schema';
 import {
   buildOpenRouterKeyName,
   createOpenRouterKey,
@@ -24,6 +27,7 @@ import {
 } from '@/lib/openrouter';
 import {
   createSubscriptionCheckout,
+  createSubscriptionPortal,
   getSubscriptionAccess,
   hasGrantedAccess,
   readEntitlementsView,
@@ -31,6 +35,17 @@ import {
   DEFAULT_PRODUCT_CODE,
   type SubscriptionAccessSnapshot,
 } from '@/lib/openmercato-subscriptions';
+import {
+  buildSandboxQuota,
+  SANDBOX_QUOTA_COUNTED_STATUSES,
+  type SandboxQuota,
+} from '@/lib/sandbox-quota';
+import {
+  getWorkspaceBillingSecrets,
+  upsertWorkspaceBillingSecrets,
+  type WorkspaceBillingEnv,
+} from '@/lib/k8s/workspace-secrets';
+
 export const BILLING_ERROR_CODES = {
   AI_ENTITLEMENT_REQUIRED: 'ai_entitlement_required',
   INVALID_WEBHOOK_SIGNATURE: 'invalid_webhook_signature',
@@ -55,43 +70,349 @@ export class OmBillingError extends Error {
   }
 }
 
-export interface OmBillingUserRef {
+export interface OmBillingUser {
   id: string;
   email: string;
-  openmercato_customer_person_id: string | null;
-  coder_user_id: string | null;
+  openMercatoCustomerPersonId: string | null;
+  coderUserId: string | null;
+  coderUsername: string | null;
+  coderTempPassword: string | null;
 }
 
-interface OmBillingUserRow extends QueryResultRow {
+export interface OmLlmAccountRow {
   id: string;
-  email: string;
-  openmercato_customer_person_id: string | null;
-  coder_user_id: string | null;
-  coder_username: string | null;
-  coder_temp_password: string | null;
-}
-
-interface LlmAccountRow extends QueryResultRow {
-  id: string;
-  user_id: string;
+  userId: string;
   provider: string;
-  openrouter_key_hash: string;
-  openrouter_key_label: string;
+  openrouterKeyHash: string;
+  openrouterKeyLabel: string;
   status: string;
-  coder_secret_sync_state: string;
-  limit_usd: string | number;
-  limit_reset: string | null;
-  last_synced_at: Date | string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
+  coderSecretSyncState: string;
+  limitUsd: number;
+  limitReset: string | null;
+  lastSyncedAt: Date | null;
 }
+
+export interface OmLatestUsageSnapshot {
+  usageTotalUsd: number;
+  usageMonthlyUsd: number;
+  limitRemainingUsd: number;
+  observedAt: Date;
+}
+
+export interface OmBillingRepository {
+  getUser: (userId: string) => Promise<OmBillingUser | null>;
+  setUserCoderFields: (
+    userId: string,
+    fields: { coderUserId: string; coderUsername: string; coderTempPassword: string | null },
+  ) => Promise<void>;
+  getLlmAccount: (userId: string) => Promise<OmLlmAccountRow | null>;
+  insertBillingOrder: (input: {
+    userId: string;
+    provider: string;
+    providerOrderId: string;
+  }) => Promise<void>;
+  countQuotaSandboxes: (userId: string) => Promise<number>;
+  listWorkspaceCredentialSecretNames: (userId: string) => Promise<string[]>;
+  getLatestUsageSnapshot: (llmAccountId: string) => Promise<OmLatestUsageSnapshot | null>;
+  listActiveLlmAccounts: () => Promise<OmLlmAccountRow[]>;
+  syncLlmAccountFromProvider: (
+    accountId: string,
+    fields: {
+      keyLabel: string;
+      limitUsd: number;
+      limitReset: string | null;
+      status: string;
+    },
+  ) => Promise<void>;
+  insertUsageSnapshot: (input: {
+    llmAccountId: string;
+    usageTotalUsd: number;
+    usageMonthlyUsd: number;
+    limitRemainingUsd: number;
+  }) => Promise<void>;
+  /**
+   * Run `fn` inside a serializable transaction. The inner repository is bound
+   * to the transaction (so `for update` reads and writes are atomic).
+   */
+  transaction: <T>(fn: (txRepo: OmBillingTxRepository) => Promise<T>) => Promise<T>;
+}
+
+export interface OmBillingTxRepository {
+  getUser: (userId: string) => Promise<OmBillingUser | null>;
+  setUserCoderFields: (
+    userId: string,
+    fields: { coderUserId: string; coderUsername: string; coderTempPassword: string | null },
+  ) => Promise<void>;
+  getLlmAccount: (userId: string, forUpdate?: boolean) => Promise<OmLlmAccountRow | null>;
+  upsertLlmAccount: (input: {
+    userId: string;
+    keyHash: string;
+    keyLabel: string;
+    status: string;
+    coderSecretSyncState: string;
+    limitUsd: number;
+    limitReset: string | null;
+  }) => Promise<string>;
+  insertUsageSnapshot: (input: {
+    llmAccountId: string;
+    usageTotalUsd: number;
+    usageMonthlyUsd: number;
+    limitRemainingUsd: number;
+  }) => Promise<void>;
+  suspendLlmAccount: (accountId: string) => Promise<void>;
+  findBillingEvent: (
+    providerEventId: string,
+  ) => Promise<{ id: string; processedAt: Date | null } | null>;
+  insertBillingEvent: (input: {
+    providerEventId: string;
+    eventType: string;
+    payload: Record<string, unknown>;
+  }) => Promise<void>;
+  markBillingEventProcessed: (providerEventId: string) => Promise<void>;
+}
+
+type DrizzleDb = typeof db;
+type DrizzleTx = Parameters<Parameters<DrizzleDb['transaction']>[0]>[0];
+type DbOrTx = DrizzleDb | DrizzleTx;
+
+function toBillingUser(row: typeof users.$inferSelect | undefined): OmBillingUser | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    openMercatoCustomerPersonId: row.openMercatoCustomerPersonId,
+    coderUserId: row.coderUserId,
+    coderUsername: row.coderUsername,
+    coderTempPassword: row.coderTempPassword,
+  };
+}
+
+function toLlmAccountRow(
+  row: typeof llmAccounts.$inferSelect | undefined,
+): OmLlmAccountRow | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    provider: row.provider,
+    openrouterKeyHash: row.openrouterKeyHash,
+    openrouterKeyLabel: row.openrouterKeyLabel,
+    status: row.status,
+    coderSecretSyncState: row.coderSecretSyncState,
+    limitUsd: row.limitUsd,
+    limitReset: row.limitReset,
+    lastSyncedAt: row.lastSyncedAt,
+  };
+}
+
+function buildTxRepository(tx: DrizzleTx): OmBillingTxRepository {
+  return {
+    async getUser(userId) {
+      const [row] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+      return toBillingUser(row);
+    },
+    async setUserCoderFields(userId, fields) {
+      await tx
+        .update(users)
+        .set({
+          coderUserId: fields.coderUserId,
+          coderUsername: fields.coderUsername,
+          coderTempPassword: fields.coderTempPassword,
+        })
+        .where(eq(users.id, userId));
+    },
+    async getLlmAccount(userId, forUpdate = false) {
+      const builder = tx.select().from(llmAccounts).where(eq(llmAccounts.userId, userId)).limit(1);
+      const [row] = await (forUpdate ? builder.for('update') : builder);
+      return toLlmAccountRow(row);
+    },
+    async upsertLlmAccount(input) {
+      const [row] = await tx
+        .insert(llmAccounts)
+        .values({
+          userId: input.userId,
+          provider: 'openrouter',
+          openrouterKeyHash: input.keyHash,
+          openrouterKeyLabel: input.keyLabel,
+          status: input.status,
+          coderSecretSyncState: input.coderSecretSyncState,
+          limitUsd: input.limitUsd,
+          limitReset: input.limitReset,
+          lastSyncedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: llmAccounts.userId,
+          set: {
+            provider: 'openrouter',
+            openrouterKeyHash: input.keyHash,
+            openrouterKeyLabel: input.keyLabel,
+            status: input.status,
+            coderSecretSyncState: input.coderSecretSyncState,
+            limitUsd: input.limitUsd,
+            limitReset: input.limitReset,
+            lastSyncedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: llmAccounts.id });
+      return row!.id;
+    },
+    async insertUsageSnapshot(input) {
+      await tx.insert(llmUsageSnapshots).values({
+        llmAccountId: input.llmAccountId,
+        usageTotalUsd: input.usageTotalUsd,
+        usageMonthlyUsd: input.usageMonthlyUsd,
+        limitRemainingUsd: input.limitRemainingUsd,
+        observedAt: new Date(),
+      });
+    },
+    async suspendLlmAccount(accountId) {
+      await tx
+        .update(llmAccounts)
+        .set({ status: 'suspended', updatedAt: new Date() })
+        .where(eq(llmAccounts.id, accountId));
+    },
+    async findBillingEvent(providerEventId) {
+      const [row] = await tx
+        .select({ id: billingEvents.id, processedAt: billingEvents.processedAt })
+        .from(billingEvents)
+        .where(eq(billingEvents.providerEventId, providerEventId))
+        .for('update')
+        .limit(1);
+      return row ? { id: row.id, processedAt: row.processedAt } : null;
+    },
+    async insertBillingEvent(input) {
+      await tx.insert(billingEvents).values({
+        provider: OM_BILLING_PROVIDER,
+        providerEventId: input.providerEventId,
+        eventType: input.eventType,
+        payloadJson: input.payload,
+      });
+    },
+    async markBillingEventProcessed(providerEventId) {
+      await tx
+        .update(billingEvents)
+        .set({ processedAt: new Date() })
+        .where(eq(billingEvents.providerEventId, providerEventId));
+    },
+  };
+}
+
+export const defaultOmBillingRepository: OmBillingRepository = {
+  async getUser(userId) {
+    const [row] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return toBillingUser(row);
+  },
+  async setUserCoderFields(userId, fields) {
+    await db
+      .update(users)
+      .set({
+        coderUserId: fields.coderUserId,
+        coderUsername: fields.coderUsername,
+        coderTempPassword: fields.coderTempPassword,
+      })
+      .where(eq(users.id, userId));
+  },
+  async getLlmAccount(userId) {
+    const [row] = await db
+      .select()
+      .from(llmAccounts)
+      .where(eq(llmAccounts.userId, userId))
+      .limit(1);
+    return toLlmAccountRow(row);
+  },
+  async insertBillingOrder(input) {
+    await db.insert(billingOrders).values({
+      userId: input.userId,
+      provider: input.provider,
+      providerOrderId: input.providerOrderId,
+      status: 'pending',
+      planType: 'activation',
+      amountPln: 0,
+      creditsUsd: 0,
+      updatedAt: new Date(),
+    });
+  },
+  async getLatestUsageSnapshot(llmAccountId) {
+    const [row] = await db
+      .select({
+        usageTotalUsd: llmUsageSnapshots.usageTotalUsd,
+        usageMonthlyUsd: llmUsageSnapshots.usageMonthlyUsd,
+        limitRemainingUsd: llmUsageSnapshots.limitRemainingUsd,
+        observedAt: llmUsageSnapshots.observedAt,
+      })
+      .from(llmUsageSnapshots)
+      .where(eq(llmUsageSnapshots.llmAccountId, llmAccountId))
+      .orderBy(desc(llmUsageSnapshots.observedAt))
+      .limit(1);
+    return row ?? null;
+  },
+  async countQuotaSandboxes(userId) {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sandboxes)
+      .where(
+        and(
+          eq(sandboxes.userId, userId),
+          inArray(sandboxes.status, [...SANDBOX_QUOTA_COUNTED_STATUSES]),
+        ),
+      );
+    return Number(row?.count ?? 0);
+  },
+  async listWorkspaceCredentialSecretNames(userId) {
+    const rows = await db
+      .select({ secretName: sandboxes.workspaceCredsSecretName })
+      .from(sandboxes)
+      .where(
+        and(
+          eq(sandboxes.userId, userId),
+          inArray(sandboxes.status, [...SANDBOX_QUOTA_COUNTED_STATUSES]),
+          isNotNull(sandboxes.workspaceCredsSecretName),
+        ),
+      );
+    return rows
+      .map((row) => row.secretName)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  },
+  async listActiveLlmAccounts() {
+    const rows = await db.select().from(llmAccounts).where(eq(llmAccounts.status, 'active'));
+    return rows.map((r) => toLlmAccountRow(r)!).filter((r): r is OmLlmAccountRow => r !== null);
+  },
+  async syncLlmAccountFromProvider(accountId, fields) {
+    await db
+      .update(llmAccounts)
+      .set({
+        openrouterKeyLabel: fields.keyLabel,
+        limitUsd: fields.limitUsd,
+        limitReset: fields.limitReset,
+        status: fields.status,
+        lastSyncedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(llmAccounts.id, accountId));
+  },
+  async insertUsageSnapshot(input) {
+    await db.insert(llmUsageSnapshots).values({
+      llmAccountId: input.llmAccountId,
+      usageTotalUsd: input.usageTotalUsd,
+      usageMonthlyUsd: input.usageMonthlyUsd,
+      limitRemainingUsd: input.limitRemainingUsd,
+      observedAt: new Date(),
+    });
+  },
+  async transaction(fn) {
+    return db.transaction(async (tx) => fn(buildTxRepository(tx)));
+  },
+};
 
 export interface OmBillingDependencies {
-  query?: typeof query;
-  withTransaction?: typeof withTransaction;
+  repository?: OmBillingRepository;
   ensureCoderUser?: (email: string) => Promise<CoderUserRef>;
-  upsertUserSecret?: typeof upsertUserSecret;
+  getWorkspaceBillingSecrets?: typeof getWorkspaceBillingSecrets;
+  upsertWorkspaceBillingSecrets?: typeof upsertWorkspaceBillingSecrets;
   createSubscriptionCheckout?: typeof createSubscriptionCheckout;
+  createSubscriptionPortal?: typeof createSubscriptionPortal;
   getSubscriptionAccess?: typeof getSubscriptionAccess;
   createOpenRouterKey?: typeof createOpenRouterKey;
   getOpenRouterKey?: typeof getOpenRouterKey;
@@ -103,11 +424,13 @@ export interface OmBillingDependencies {
 
 function resolveDeps(deps: OmBillingDependencies = {}) {
   return {
-    query: deps.query ?? query,
-    withTransaction: deps.withTransaction ?? withTransaction,
+    repository: deps.repository ?? defaultOmBillingRepository,
     ensureCoderUser: deps.ensureCoderUser ?? ensureCoderUser,
-    upsertUserSecret: deps.upsertUserSecret ?? upsertUserSecret,
+    getWorkspaceBillingSecrets: deps.getWorkspaceBillingSecrets ?? getWorkspaceBillingSecrets,
+    upsertWorkspaceBillingSecrets:
+      deps.upsertWorkspaceBillingSecrets ?? upsertWorkspaceBillingSecrets,
     createSubscriptionCheckout: deps.createSubscriptionCheckout ?? createSubscriptionCheckout,
+    createSubscriptionPortal: deps.createSubscriptionPortal ?? createSubscriptionPortal,
     getSubscriptionAccess: deps.getSubscriptionAccess ?? getSubscriptionAccess,
     createOpenRouterKey: deps.createOpenRouterKey ?? createOpenRouterKey,
     getOpenRouterKey: deps.getOpenRouterKey ?? getOpenRouterKey,
@@ -142,131 +465,79 @@ function toMoney(value: number): number {
   return Number(value.toFixed(2));
 }
 
-function parseMoney(value: string | number | null | undefined): number {
-  if (value == null) return 0;
-  return Number(value);
-}
-
-async function getUser(db: DatabaseQueryable, userId: string): Promise<OmBillingUserRow> {
-  const result = await db.query<OmBillingUserRow>(
-    `select id, email, openmercato_customer_person_id, coder_user_id, coder_username, coder_temp_password
-       from users
-      where id = $1`,
-    [userId],
-  );
-  const user = result.rows[0];
+async function requireUser(
+  repo: { getUser: (id: string) => Promise<OmBillingUser | null> },
+  userId: string,
+): Promise<OmBillingUser> {
+  const user = await repo.getUser(userId);
   if (!user) {
     throw new OmBillingError(404, 'user_not_found', 'User not found');
   }
   return user;
 }
 
-async function getLlmAccount(
-  db: DatabaseQueryable,
-  userId: string,
-  forUpdate = false,
-): Promise<LlmAccountRow | null> {
-  const result = await db.query<LlmAccountRow>(
-    `select id, user_id, provider, openrouter_key_hash, openrouter_key_label,
-            status, coder_secret_sync_state, limit_usd, limit_reset,
-            last_synced_at, created_at, updated_at
-       from llm_accounts
-      where user_id = $1
-      ${forUpdate ? 'for update' : ''}`,
-    [userId],
-  );
-  return result.rows[0] ?? null;
-}
-
-async function upsertLlmAccount(
-  db: DatabaseQueryable,
-  userId: string,
-  key: OpenRouterApiKeyRecord,
-  status: string,
-  secretSyncState: string,
-): Promise<string> {
-  const result = await db.query<{ id: string }>(
-    `insert into llm_accounts (
-       user_id, provider, openrouter_key_hash, openrouter_key_label, status,
-       coder_secret_sync_state, limit_usd, limit_reset, last_synced_at, updated_at
-     ) values ($1, 'openrouter', $2, $3, $4, $5, $6, $7, now(), now())
-     on conflict (user_id) do update set
-       provider = excluded.provider,
-       openrouter_key_hash = excluded.openrouter_key_hash,
-       openrouter_key_label = excluded.openrouter_key_label,
-       status = excluded.status,
-       coder_secret_sync_state = excluded.coder_secret_sync_state,
-       limit_usd = excluded.limit_usd,
-       limit_reset = excluded.limit_reset,
-       last_synced_at = excluded.last_synced_at,
-       updated_at = now()
-     returning id`,
-    [
-      userId,
-      key.hash,
-      key.label,
-      status,
-      secretSyncState,
-      toMoney(key.limit ?? 0),
-      key.limit_reset,
-    ],
-  );
-  return result.rows[0]!.id;
-}
-
-async function insertUsageSnapshot(
-  db: DatabaseQueryable,
-  llmAccountId: string,
-  key: OpenRouterApiKeyRecord,
-): Promise<void> {
-  await db.query(
-    `insert into llm_usage_snapshots (
-       llm_account_id, usage_total_usd, usage_monthly_usd, limit_remaining_usd, observed_at
-     ) values ($1, $2, $3, $4, now())`,
-    [
-      llmAccountId,
-      toMoney(key.usage),
-      toMoney(key.usage_monthly),
-      toMoney(key.limit_remaining ?? 0),
-    ],
-  );
-}
-
-async function upsertBillingSecrets(
-  upsertSecret: typeof upsertUserSecret,
-  coderUserId: string,
-  rawKey: string,
-): Promise<void> {
-  await upsertSecret(coderUserId, {
-    name: 'OPENROUTER_API_KEY',
-    env_name: 'OPENROUTER_API_KEY',
-    description: 'Per-user OpenRouter key for Codex inside Open Mercato sandboxes',
-    value: rawKey,
-  });
-  await upsertSecret(coderUserId, {
-    name: 'ANTHROPIC_AUTH_TOKEN',
-    env_name: 'ANTHROPIC_AUTH_TOKEN',
-    description: 'Per-user OpenRouter-backed Anthropic auth token for Claude',
-    value: rawKey,
-  });
-}
-
 async function ensureCoderUserForRow(
-  db: DatabaseQueryable,
-  user: OmBillingUserRow,
+  txRepo: OmBillingTxRepository,
+  user: OmBillingUser,
   factory: (email: string) => Promise<CoderUserRef>,
 ): Promise<string> {
-  if (user.coder_user_id) return user.coder_user_id;
+  if (user.coderUserId) return user.coderUserId;
   const created = await factory(user.email);
-  await db.query(
-    `update users
-        set coder_user_id = $1,
-            coder_username = $2,
-            coder_temp_password = $3
-      where id = $4`,
-    [created.id, created.username, created.tempPassword, user.id],
-  );
+  await txRepo.setUserCoderFields(user.id, {
+    coderUserId: created.id,
+    coderUsername: created.username,
+    coderTempPassword: created.tempPassword,
+  });
   return created.id;
+}
+
+interface WorkspaceBillingSecretSync {
+  synced: boolean;
+  targetCount: number;
+}
+
+function hasCompleteWorkspaceBillingEnv(env: WorkspaceBillingEnv | null): env is WorkspaceBillingEnv {
+  return Boolean(env?.OPENROUTER_API_KEY && env.ANTHROPIC_AUTH_TOKEN);
+}
+
+async function ensureWorkspaceBillingSecrets(
+  secretNames: string[],
+  getSecret: typeof getWorkspaceBillingSecrets,
+  upsertSecret: typeof upsertWorkspaceBillingSecrets,
+  rawKey: string | null,
+): Promise<WorkspaceBillingSecretSync> {
+  if (secretNames.length === 0) {
+    return { synced: rawKey === null, targetCount: 0 };
+  }
+
+  let sourceKey = rawKey;
+  const missing: string[] = [];
+
+  for (const secretName of secretNames) {
+    const existing = await getSecret(secretName);
+    if (hasCompleteWorkspaceBillingEnv(existing)) {
+      sourceKey ??= existing.OPENROUTER_API_KEY;
+    } else {
+      missing.push(secretName);
+    }
+  }
+
+  if (!sourceKey) {
+    return { synced: false, targetCount: secretNames.length };
+  }
+
+  const finalSourceKey = sourceKey;
+  const targets = rawKey ? secretNames : missing;
+  await Promise.all(
+    targets.map((secretName) =>
+      upsertSecret(secretName, {
+        OPENROUTER_API_KEY: finalSourceKey,
+        ANTHROPIC_AUTH_TOKEN: finalSourceKey,
+      }),
+    ),
+  );
+
+  return { synced: true, targetCount: secretNames.length };
 }
 
 export interface StartSubscriptionCheckoutInput {
@@ -287,9 +558,8 @@ export async function startSubscriptionCheckout(
   deps: OmBillingDependencies = {},
 ): Promise<StartSubscriptionCheckoutResult> {
   const resolved = resolveDeps(deps);
-  const db = { query: resolved.query };
-  const user = await getUser(db, input.userId);
-  if (!user.openmercato_customer_person_id) {
+  const user = await requireUser(resolved.repository, input.userId);
+  if (!user.openMercatoCustomerPersonId) {
     throw new OmBillingError(
       409,
       'crm_customer_missing',
@@ -305,7 +575,7 @@ export async function startSubscriptionCheckout(
   try {
     checkout = await resolved.createSubscriptionCheckout({
       externalAccountId: user.id,
-      subjectEntityId: user.openmercato_customer_person_id,
+      subjectEntityId: user.openMercatoCustomerPersonId,
       priceCode: chosenPriceCode,
       successUrl,
       cancelUrl,
@@ -318,12 +588,11 @@ export async function startSubscriptionCheckout(
     );
   }
 
-  await resolved.query(
-    `insert into billing_orders (
-       user_id, provider, provider_order_id, status, plan_type, amount_pln, credits_usd, updated_at
-     ) values ($1, $2, $3, 'pending', 'activation', 0, 0, now())`,
-    [user.id, OM_BILLING_PROVIDER, checkout.subscriptionRequestId],
-  );
+  await resolved.repository.insertBillingOrder({
+    userId: user.id,
+    provider: OM_BILLING_PROVIDER,
+    providerOrderId: checkout.subscriptionRequestId,
+  });
 
   return {
     checkoutUrl: checkout.checkoutUrl,
@@ -331,6 +600,38 @@ export async function startSubscriptionCheckout(
     priceCode: chosenPriceCode,
     productCode: productCode(),
   };
+}
+
+export interface StartSubscriptionPortalInput {
+  userId: string;
+  baseUrl: string;
+}
+
+export interface StartSubscriptionPortalResult {
+  portalUrl: string;
+}
+
+export async function startSubscriptionPortal(
+  input: StartSubscriptionPortalInput,
+  deps: OmBillingDependencies = {},
+): Promise<StartSubscriptionPortalResult> {
+  const resolved = resolveDeps(deps);
+  const user = await requireUser(resolved.repository, input.userId);
+  const returnUrl = new URL('/billing', input.baseUrl).toString();
+
+  try {
+    const portal = await resolved.createSubscriptionPortal({
+      externalAccountId: user.id,
+      returnUrl,
+    });
+    return { portalUrl: portal.portalUrl };
+  } catch (error) {
+    throw new OmBillingError(
+      502,
+      'om_portal_failed',
+      `Open Mercato subscriptions portal failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export interface ReconcileLlmAccessResult {
@@ -345,8 +646,7 @@ export async function reconcileLlmAccessForUser(
   deps: OmBillingDependencies = {},
 ): Promise<ReconcileLlmAccessResult> {
   const resolved = resolveDeps(deps);
-  const db = { query: resolved.query };
-  const user = await getUser(db, userId);
+  const user = await requireUser(resolved.repository, userId);
 
   const snapshot = await resolved.getSubscriptionAccess({
     externalAccountId: user.id,
@@ -354,9 +654,12 @@ export async function reconcileLlmAccessForUser(
   });
 
   if (!hasGrantedAccess(snapshot)) {
-    const llmAccount = await getLlmAccount(db, user.id);
+    const llmAccount = await resolved.repository.getLlmAccount(user.id);
     if (llmAccount && llmAccount.status === 'active') {
-      await suspendLlmAccount(resolved, db, user.id, llmAccount);
+      await resolved.disableOpenRouterKey(llmAccount.openrouterKeyHash).catch(() => {});
+      await resolved.repository.transaction(async (tx) => {
+        await tx.suspendLlmAccount(llmAccount.id);
+      });
       return {
         accessSnapshot: snapshot,
         llmAccountStatus: 'suspended',
@@ -375,16 +678,32 @@ export async function reconcileLlmAccessForUser(
   const entitlements = readEntitlementsView(snapshot.entitlements);
   const targetLimit = toMoney(Math.max(entitlements.openRouterTokensUsageUsd ?? 0, 0));
 
-  const result = await resolved.withTransaction(async (txDb) => {
-    const lockedUser = await getUser(txDb, user.id);
-    const coderUserId = await ensureCoderUserForRow(txDb, lockedUser, resolved.ensureCoderUser);
-    const llmAccount = await getLlmAccount(txDb, lockedUser.id, true);
+  const result = await resolved.repository.transaction(async (tx) => {
+    const lockedUser = await tx.getUser(user.id);
+    if (!lockedUser) {
+      throw new OmBillingError(404, 'user_not_found', 'User not found');
+    }
+    await ensureCoderUserForRow(tx, lockedUser, resolved.ensureCoderUser);
+    const llmAccount = await tx.getLlmAccount(lockedUser.id, true);
+    const workspaceSecretNames = await resolved.repository.listWorkspaceCredentialSecretNames(
+      lockedUser.id,
+    );
+    const billingSecretsSynced =
+      llmAccount?.status === 'active' &&
+      llmAccount.coderSecretSyncState === 'synced' &&
+      (await ensureWorkspaceBillingSecrets(
+        workspaceSecretNames,
+        resolved.getWorkspaceBillingSecrets,
+        resolved.upsertWorkspaceBillingSecrets,
+        null,
+      )).synced;
 
     if (
-      llmAccount
-      && llmAccount.status === 'active'
-      && llmAccount.coder_secret_sync_state === 'synced'
-      && parseMoney(llmAccount.limit_usd) === targetLimit
+      llmAccount &&
+      llmAccount.status === 'active' &&
+      llmAccount.coderSecretSyncState === 'synced' &&
+      llmAccount.limitUsd === targetLimit &&
+      billingSecretsSynced
     ) {
       return {
         llmAccountStatus: 'active',
@@ -410,8 +729,9 @@ export async function reconcileLlmAccessForUser(
       providerKey = createdKey;
       rawKeyForSecretSync = createdKey.key;
     } else if (
-      llmAccount.coder_secret_sync_state !== 'synced'
-      || llmAccount.status !== 'active'
+      llmAccount.coderSecretSyncState !== 'synced' ||
+      llmAccount.status !== 'active' ||
+      !billingSecretsSynced
     ) {
       const replacementKey = await resolved.createOpenRouterKey({
         name: keyName,
@@ -420,12 +740,13 @@ export async function reconcileLlmAccessForUser(
       });
       providerKey = replacementKey;
       rawKeyForSecretSync = replacementKey.key;
-      await resolved.deleteOpenRouterKey(llmAccount.openrouter_key_hash).catch(async () => {
-        await resolved.updateOpenRouterKey(llmAccount.openrouter_key_hash, { disabled: true })
+      await resolved.deleteOpenRouterKey(llmAccount.openrouterKeyHash).catch(async () => {
+        await resolved
+          .updateOpenRouterKey(llmAccount.openrouterKeyHash, { disabled: true })
           .catch(() => {});
       });
     } else {
-      providerKey = await resolved.updateOpenRouterKey(llmAccount.openrouter_key_hash, {
+      providerKey = await resolved.updateOpenRouterKey(llmAccount.openrouterKeyHash, {
         name: keyName,
         limit: targetLimit,
         disabled: false,
@@ -433,32 +754,67 @@ export async function reconcileLlmAccessForUser(
     }
 
     let status = 'active';
-    let secretSyncState: string = llmAccount?.coder_secret_sync_state === 'synced' && !rawKeyForSecretSync
-      ? 'synced'
-      : 'pending';
+    let secretSyncState: string =
+      llmAccount?.coderSecretSyncState === 'synced' && !rawKeyForSecretSync ? 'synced' : 'pending';
 
     if (rawKeyForSecretSync) {
       try {
-        await upsertBillingSecrets(resolved.upsertUserSecret, coderUserId, rawKeyForSecretSync);
-        secretSyncState = 'synced';
+        const syncResult = await ensureWorkspaceBillingSecrets(
+          workspaceSecretNames,
+          resolved.getWorkspaceBillingSecrets,
+          resolved.upsertWorkspaceBillingSecrets,
+          rawKeyForSecretSync,
+        );
+        secretSyncState = syncResult.synced ? 'synced' : 'pending';
       } catch (error) {
         status = 'sync_failed';
         secretSyncState = 'failed';
-        // We still upsert llm_accounts so the failure is visible; reconcile will retry later
-        const failedAccountId = await upsertLlmAccount(txDb, lockedUser.id, providerKey, status, secretSyncState);
-        await insertUsageSnapshot(txDb, failedAccountId, providerKey);
+        const failedAccountId = await tx.upsertLlmAccount({
+          userId: lockedUser.id,
+          keyHash: providerKey.hash,
+          keyLabel: providerKey.label,
+          status,
+          coderSecretSyncState: secretSyncState,
+          limitUsd: toMoney(providerKey.limit ?? 0),
+          limitReset: providerKey.limit_reset,
+        });
+        await tx.insertUsageSnapshot({
+          llmAccountId: failedAccountId,
+          usageTotalUsd: toMoney(providerKey.usage),
+          usageMonthlyUsd: toMoney(providerKey.usage_monthly),
+          limitRemainingUsd: toMoney(providerKey.limit_remaining ?? 0),
+        });
         throw new OmBillingError(
           502,
-          'coder_secret_sync_failed',
+          'workspace_secret_sync_failed',
           error instanceof Error ? error.message : String(error),
         );
       }
+    } else if (secretSyncState !== 'synced') {
+      throw new OmBillingError(
+        502,
+        'openrouter_key_missing',
+        'OpenRouter create key response did not include a raw key for workspace secret sync',
+      );
     } else {
       secretSyncState = 'synced';
     }
 
-    const llmAccountId = await upsertLlmAccount(txDb, lockedUser.id, providerKey, status, secretSyncState);
-    await insertUsageSnapshot(txDb, llmAccountId, providerKey);
+    const llmAccountId = await tx.upsertLlmAccount({
+      userId: lockedUser.id,
+      keyHash: providerKey.hash,
+      keyLabel: providerKey.label,
+      status,
+      coderSecretSyncState: secretSyncState,
+      limitUsd: toMoney(providerKey.limit ?? 0),
+      limitReset: providerKey.limit_reset,
+    });
+    await tx.insertUsageSnapshot({
+      llmAccountId,
+      usageTotalUsd: toMoney(providerKey.usage),
+      usageMonthlyUsd: toMoney(providerKey.usage_monthly),
+      limitRemainingUsd: toMoney(providerKey.limit_remaining ?? 0),
+    });
 
     return {
       llmAccountStatus: status,
@@ -473,21 +829,6 @@ export async function reconcileLlmAccessForUser(
     llmAccountId: result.llmAccountId,
     changed: result.changed,
   };
-}
-
-async function suspendLlmAccount(
-  resolved: ReturnType<typeof resolveDeps>,
-  db: DatabaseQueryable,
-  userId: string,
-  llmAccount: LlmAccountRow,
-): Promise<void> {
-  await resolved.disableOpenRouterKey(llmAccount.openrouter_key_hash).catch(() => {});
-  await db.query(
-    `update llm_accounts
-        set status = 'suspended', updated_at = now()
-      where id = $1`,
-    [llmAccount.id],
-  );
 }
 
 export interface OmBillingSummary {
@@ -505,14 +846,8 @@ export interface OmBillingSummary {
     limitRemainingUsd: number;
     observedAt: string;
   } | null;
+  sandboxQuota: SandboxQuota;
   canCreateSandbox: boolean;
-}
-
-interface LlmUsageSnapshotRow extends QueryResultRow {
-  usage_total_usd: string | number;
-  usage_monthly_usd: string | number;
-  limit_remaining_usd: string | number;
-  observed_at: Date | string;
 }
 
 function toIsoString(value: Date | string | null): string | null {
@@ -525,8 +860,7 @@ export async function getOmBillingSummaryForUser(
   deps: OmBillingDependencies = {},
 ): Promise<OmBillingSummary> {
   const resolved = resolveDeps(deps);
-  const db = { query: resolved.query };
-  const user = await getUser(db, userId);
+  const user = await requireUser(resolved.repository, userId);
 
   let accessSnapshot: SubscriptionAccessSnapshot | null = null;
   try {
@@ -538,42 +872,40 @@ export async function getOmBillingSummaryForUser(
     accessSnapshot = null;
   }
 
-  const llmAccount = await getLlmAccount(db, user.id);
-  const latestUsageResult = llmAccount
-    ? await resolved.query<LlmUsageSnapshotRow>(
-      `select usage_total_usd, usage_monthly_usd, limit_remaining_usd, observed_at
-         from llm_usage_snapshots
-        where llm_account_id = $1
-        order by observed_at desc
-        limit 1`,
-      [llmAccount.id],
-    )
-    : { rows: [] as LlmUsageSnapshotRow[] };
+  const llmAccount = await resolved.repository.getLlmAccount(user.id);
+  const latestUsage = llmAccount
+    ? await resolved.repository.getLatestUsageSnapshot(llmAccount.id)
+    : null;
+  const quotaUsed = await resolved.repository.countQuotaSandboxes(user.id);
+  const sandboxQuota = buildSandboxQuota(accessSnapshot?.entitlements ?? null, quotaUsed);
 
-  const latestUsage = latestUsageResult.rows[0] ?? null;
-  const canCreateSandbox = hasGrantedAccess(accessSnapshot)
-    && llmAccount?.status === 'active'
-    && llmAccount.coder_secret_sync_state === 'synced';
+  const canCreateSandbox =
+    hasGrantedAccess(accessSnapshot) &&
+    llmAccount?.status === 'active' &&
+    llmAccount.coderSecretSyncState === 'synced' &&
+    sandboxQuota.valid &&
+    !sandboxQuota.reached;
 
   return {
     accessSnapshot,
     llmAccount: llmAccount
       ? {
-        id: llmAccount.id,
-        status: llmAccount.status,
-        secretSyncState: llmAccount.coder_secret_sync_state,
-        limitUsd: parseMoney(llmAccount.limit_usd),
-        lastSyncedAt: toIsoString(llmAccount.last_synced_at),
-      }
+          id: llmAccount.id,
+          status: llmAccount.status,
+          secretSyncState: llmAccount.coderSecretSyncState,
+          limitUsd: llmAccount.limitUsd,
+          lastSyncedAt: toIsoString(llmAccount.lastSyncedAt),
+        }
       : null,
     latestUsage: latestUsage
       ? {
-        usageTotalUsd: parseMoney(latestUsage.usage_total_usd),
-        usageMonthlyUsd: parseMoney(latestUsage.usage_monthly_usd),
-        limitRemainingUsd: parseMoney(latestUsage.limit_remaining_usd),
-        observedAt: toIsoString(latestUsage.observed_at)!,
-      }
+          usageTotalUsd: latestUsage.usageTotalUsd,
+          usageMonthlyUsd: latestUsage.usageMonthlyUsd,
+          limitRemainingUsd: latestUsage.limitRemainingUsd,
+          observedAt: toIsoString(latestUsage.observedAt)!,
+        }
       : null,
+    sandboxQuota,
     canCreateSandbox: Boolean(canCreateSandbox),
   };
 }
@@ -581,13 +913,10 @@ export async function getOmBillingSummaryForUser(
 export async function assertActiveSandboxEntitlement(
   userId: string,
   deps: OmBillingDependencies = {},
-): Promise<void> {
+): Promise<SubscriptionAccessSnapshot> {
   const result = await reconcileLlmAccessForUser(userId, deps);
-  if (
-    hasGrantedAccess(result.accessSnapshot)
-    && result.llmAccountStatus === 'active'
-  ) {
-    return;
+  if (hasGrantedAccess(result.accessSnapshot) && result.llmAccountStatus === 'active') {
+    return result.accessSnapshot;
   }
   throw new OmBillingError(
     402,
@@ -622,20 +951,25 @@ function readWebhookPayload(value: Record<string, unknown>): OmWebhookPayload {
   const productCodeRaw = typeof value.productCode === 'string' ? value.productCode : '';
   const accessStateRaw = typeof value.accessState === 'string' ? value.accessState : '';
   if (
-    !externalAccountId
-    || !productCodeRaw
-    || !['pending', 'granted', 'grace', 'blocked'].includes(accessStateRaw)
+    !externalAccountId ||
+    !productCodeRaw ||
+    !['pending', 'granted', 'grace', 'blocked'].includes(accessStateRaw)
   ) {
-    throw new OmBillingError(400, 'invalid_webhook_payload', 'Open Mercato webhook payload is missing required fields');
+    throw new OmBillingError(
+      400,
+      'invalid_webhook_payload',
+      'Open Mercato webhook payload is missing required fields',
+    );
   }
   return {
     externalAccountId,
     productCode: productCodeRaw,
     accessState: accessStateRaw as OmWebhookPayload['accessState'],
     subscriptionId: typeof value.subscriptionId === 'string' ? value.subscriptionId : null,
-    entitlements: value.entitlements && typeof value.entitlements === 'object' && !Array.isArray(value.entitlements)
-      ? value.entitlements as Record<string, unknown>
-      : null,
+    entitlements:
+      value.entitlements && typeof value.entitlements === 'object' && !Array.isArray(value.entitlements)
+        ? (value.entitlements as Record<string, unknown>)
+        : null,
     occurredAt: typeof value.occurredAt === 'string' ? value.occurredAt : undefined,
   };
 }
@@ -690,26 +1024,21 @@ export async function processOmAccessChangedWebhook(
   }
 
   const resolved = resolveDeps(deps);
-  const eventId = input.deliveryId || `om-${payload.externalAccountId}-${payload.subscriptionId ?? 'na'}-${payload.occurredAt ?? Date.now()}`;
+  const eventId =
+    input.deliveryId ||
+    `om-${payload.externalAccountId}-${payload.subscriptionId ?? 'na'}-${payload.occurredAt ?? Date.now()}`;
 
-  const dedupe = await resolved.withTransaction(async (db) => {
-    const existing = await db.query<{ id: string; processed_at: Date | string | null }>(
-      `select id, processed_at
-         from billing_events
-        where provider_event_id = $1
-        for update`,
-      [eventId],
-    );
-    if (existing.rows[0]?.processed_at) {
+  const dedupe = await resolved.repository.transaction(async (tx) => {
+    const existing = await tx.findBillingEvent(eventId);
+    if (existing?.processedAt) {
       return { already: true };
     }
-    if (existing.rowCount === 0) {
-      await db.query(
-        `insert into billing_events (
-           provider, provider_event_id, event_type, payload_json
-         ) values ($1, $2, $3, $4::jsonb)`,
-        [OM_BILLING_PROVIDER, eventId, 'subscriptions.access.changed', JSON.stringify(payload)],
-      );
+    if (!existing) {
+      await tx.insertBillingEvent({
+        providerEventId: eventId,
+        eventType: 'subscriptions.access.changed',
+        payload: payload as unknown as Record<string, unknown>,
+      });
     }
     return { already: false };
   });
@@ -724,12 +1053,9 @@ export async function processOmAccessChangedWebhook(
 
   await reconcileLlmAccessForUser(payload.externalAccountId, deps);
 
-  await resolved.query(
-    `update billing_events
-        set processed_at = now()
-      where provider_event_id = $1`,
-    [eventId],
-  );
+  await resolved.repository.transaction(async (tx) => {
+    await tx.markBillingEventProcessed(eventId);
+  });
 
   return {
     already_processed: false,
@@ -753,56 +1079,38 @@ export async function syncActiveOmBillingUsage(
   deps: OmBillingDependencies = {},
 ): Promise<UsageSyncResult> {
   const resolved = resolveDeps(deps);
-  const accounts = await resolved.query<LlmAccountRow>(
-    `select id, user_id, provider, openrouter_key_hash, openrouter_key_label,
-            status, coder_secret_sync_state, limit_usd, limit_reset,
-            last_synced_at, created_at, updated_at
-       from llm_accounts
-      where status = 'active'`,
-  );
+  const accounts = await resolved.repository.listActiveLlmAccounts();
 
   let reconciled = 0;
   let snapshotWritten = 0;
   let failed = 0;
 
-  for (const account of accounts.rows) {
+  for (const account of accounts) {
     try {
-      await reconcileLlmAccessForUser(account.user_id, deps);
+      await reconcileLlmAccessForUser(account.userId, deps);
       reconciled += 1;
     } catch {
       failed += 1;
       continue;
     }
     try {
-      const key = await resolved.getOpenRouterKey(account.openrouter_key_hash);
-      await resolved.query(
-        `update llm_accounts
-            set openrouter_key_label = $2,
-                limit_usd = $3,
-                limit_reset = $4,
-                status = $5,
-                last_synced_at = now(),
-                updated_at = now()
-          where id = $1`,
-        [
-          account.id,
-          key.label,
-          toMoney(key.limit ?? 0),
-          key.limit_reset,
-          key.disabled ? 'suspended' : 'active',
-        ],
-      );
-      await resolved.query(
-        `insert into llm_usage_snapshots (
-           llm_account_id, usage_total_usd, usage_monthly_usd, limit_remaining_usd, observed_at
-         ) values ($1, $2, $3, $4, now())`,
-        [
-          account.id,
-          toMoney(key.usage),
-          toMoney(key.usage_monthly),
-          toMoney(key.limit_remaining ?? 0),
-        ],
-      );
+      const latestAccount = await resolved.repository.getLlmAccount(account.userId);
+      if (!latestAccount || latestAccount.status !== 'active') {
+        continue;
+      }
+      const key = await resolved.getOpenRouterKey(latestAccount.openrouterKeyHash);
+      await resolved.repository.syncLlmAccountFromProvider(latestAccount.id, {
+        keyLabel: key.label,
+        limitUsd: toMoney(key.limit ?? 0),
+        limitReset: key.limit_reset,
+        status: key.disabled ? 'suspended' : 'active',
+      });
+      await resolved.repository.insertUsageSnapshot({
+        llmAccountId: latestAccount.id,
+        usageTotalUsd: toMoney(key.usage),
+        usageMonthlyUsd: toMoney(key.usage_monthly),
+        limitRemainingUsd: toMoney(key.limit_remaining ?? 0),
+      });
       snapshotWritten += 1;
     } catch {
       failed += 1;
@@ -810,7 +1118,7 @@ export async function syncActiveOmBillingUsage(
   }
 
   return {
-    total: accounts.rowCount ?? accounts.rows.length,
+    total: accounts.length,
     reconciled,
     snapshot_written: snapshotWritten,
     failed,
@@ -828,3 +1136,7 @@ export function verifyInternalBillingSyncRequest(req: Request): void {
     );
   }
 }
+
+// Re-exports to keep imports stable
+export { and };
+export type { DbOrTx };

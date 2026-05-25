@@ -4,6 +4,7 @@ This directory contains Helmfile-managed system components for the Hetzner k3s
 path:
 
 - `cert-manager`
+- `gitea`
 - `coder`
 - `coder-bootstrap`
 - `onboarding`
@@ -21,8 +22,16 @@ The recommended cluster bootstrap path for this repo now lives under
 ## Assumptions
 
 - system nodes are labeled with `node-pool=system`
-- the built-in k3s `local-path` provisioner is enabled and available as the
-  storage class `local-path`
+- the Hetzner Cloud CSI driver is enabled and available as the storage class
+  `hcloud-volumes`. This is the default storage class for every PVC that must
+  survive node loss (workspace `/home/coder`, the workspace sidecar
+  PostgreSQL data dir, `postgres-coder`, `postgres-onboarding`, and Gitea).
+  Hetzner replicates these volumes inside the `fsn1` DC.
+  This requires `addons.csi_driver.enabled: true` in the `hetzner-k3s` cluster
+  config.
+- the built-in k3s `local-path` provisioner is also enabled and available as
+  the storage class `local-path`. It stays for non-durable scratch / cache
+  PVCs only. Anything that holds user state must use `hcloud-volumes`.
   This requires `addons.local_path_storage_class.enabled: true` in the
   `hetzner-k3s` cluster config because recent `hetzner-k3s` releases do not
   enable it by default.
@@ -35,7 +44,8 @@ The recommended cluster bootstrap path for this repo now lives under
   workspace template tolerations still allow workspace pods to mount their PVCs
 - the default k3s control-plane taint is also tolerated
 - `local-path` is node-local and non-replicated, so losing a node can require
-  PVC restore or workload recreation
+  PVC restore or workload recreation — only use it for state you can throw
+  away
 
 If you are still using the older OpenTofu bootstrap path, equivalent manual
 node-pool labeling is done by:
@@ -64,18 +74,22 @@ helmfile -f infra/helm/helmfile.yaml -l phase=foundation apply
 ```bash
 $EDITOR infra/manifests/postgres/postgres-coder-app-secret.template.yaml
 $EDITOR infra/manifests/postgres/postgres-onboarding-app-secret.template.yaml
+$EDITOR infra/manifests/postgres/postgres-gitea-app-secret.template.yaml
 kubectl apply -f infra/manifests/postgres/postgres-coder-app-secret.template.yaml
 kubectl apply -f infra/manifests/postgres/postgres-onboarding-app-secret.template.yaml
+kubectl apply -f infra/manifests/postgres/postgres-gitea-app-secret.template.yaml
 kubectl apply -f infra/manifests/postgres/postgres-coder-cluster.yaml
 kubectl apply -f infra/manifests/postgres/postgres-onboarding-cluster.yaml
+kubectl apply -f infra/manifests/postgres/postgres-gitea-cluster.yaml
 ```
 
-4. Wait until both PostgreSQL `StatefulSet`s are ready and expose their `-rw`
+4. Wait until all PostgreSQL `StatefulSet`s are ready and expose their `-rw`
    Services:
 
 ```bash
 kubectl rollout status statefulset/postgres-coder -n mercato-sandboxes
 kubectl rollout status statefulset/postgres-onboarding -n mercato-sandboxes
+kubectl rollout status statefulset/postgres-gitea -n mercato-sandboxes
 kubectl get svc -n mercato-sandboxes | grep postgres-
 kubectl get pods -n mercato-sandboxes -l app.kubernetes.io/component=database
 ```
@@ -96,9 +110,11 @@ secret template also needs:
 - `OPENMERCATO_CUSTOMER_TENANT_ID`
 - `OPENMERCATO_CUSTOMER_ORGANIZATION_ID`
 - `OPENMERCATO_BILLING_WEBHOOK_SECRET`
+- `OM_BILLING_WEBHOOK_SECRET`
 
-`OPENMERCATO_BILLING_WEBHOOK_SECRET` must match the
-`SANDBOX_BILLING_WEBHOOK_SECRET` configured for the `openmercato` Helm release.
+`OM_BILLING_WEBHOOK_SECRET` can read the same Kubernetes Secret key as
+`OPENMERCATO_BILLING_WEBHOOK_SECRET`. It must match the
+`ONBOARDING_WEBHOOK_SECRET` configured for the `openmercato` Helm release.
 
 6. Create the bootstrap credentials for the first Coder admin user:
 
@@ -117,11 +133,11 @@ Also update `infra/helm/values/openmercato.yaml` with the final Open Mercato
 image tag, ingress host, and deployment secrets before installing that release.
 For the sandbox billing bridge, also keep these values aligned:
 
-- `SANDBOX_BILLING_WEBHOOK_URL`
+- `ONBOARDING_WEBHOOK_URL`
   This can use the internal onboarding service URL
-  `http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/openmercato/webhook`.
-- `SANDBOX_BILLING_WEBHOOK_SECRET`
-  Must match onboarding's `OPENMERCATO_BILLING_WEBHOOK_SECRET`.
+  `http://onboarding.mercato-sandboxes.svc.cluster.local/api/billing/om/webhook`.
+- `ONBOARDING_WEBHOOK_SECRET`
+  Must match onboarding's `OM_BILLING_WEBHOOK_SECRET`.
 - `OPENMERCATO_BILLING_BASE_URL` in `infra/helm/values/onboarding.yaml`
   Must stay on the public Open Mercato ingress host, not the internal service
   DNS, because hosted checkout URLs derive their origin from the incoming
@@ -137,13 +153,29 @@ The GHCR build/push convention and helper scripts live in
 For the full first-production rollout order, use
 `infra/hetzner-k3s/PRODUCTION-CHECKLIST.md`.
 
-7. Install Coder itself:
+7. Apply the Gitea credential secrets and install the Gitea release. Gitea
+   serves as the default origin for user code in workspaces.
+
+```bash
+kubectl create namespace gitea --dry-run=client -o yaml | kubectl apply -f -
+$EDITOR infra/manifests/gitea/gitea-admin-credentials.template.yaml
+$EDITOR infra/manifests/gitea/gitea-db-url.template.yaml
+kubectl apply -f infra/manifests/gitea/gitea-admin-credentials.template.yaml
+kubectl apply -f infra/manifests/gitea/gitea-db-url.template.yaml
+helmfile -f infra/helm/helmfile.yaml -l phase=gitea apply
+```
+
+Make sure the password in `gitea-db-url` matches the password in
+`postgres-gitea-app` — Gitea reads it from `gitea-db-url`, but PostgreSQL
+initialises with the value baked into `postgres-gitea-app` on first boot.
+
+8. Install Coder itself:
 
 ```bash
 helmfile -f infra/helm/helmfile.yaml -l phase=coder apply
 ```
 
-8. Run the in-cluster Coder bootstrap Job. This Job:
+9. Run the in-cluster Coder bootstrap Job. This Job:
 
 - creates the first admin user if the deployment is still fresh
 - mints or reuses the onboarding admin token
@@ -155,20 +187,26 @@ helmfile -f infra/helm/helmfile.yaml -l phase=coder apply
 helmfile -f infra/helm/helmfile.yaml -l phase=coder-bootstrap apply
 ```
 
-9. Install onboarding after the bootstrap Job succeeds:
+10. Install onboarding after the bootstrap Job succeeds. First mint and apply
+the Gitea admin PAT used by onboarding to call Gitea's admin API (create
+users, orgs, repos, deploy tokens). Login to the Gitea UI as
+`mercato-admin` (the user from `gitea-admin-credentials`) and create a
+token with scopes `admin:org`, `repo`, `user`, `write:repository`.
 
 ```bash
+$EDITOR infra/manifests/onboarding/gitea-onboarding-admin-token.template.yaml
+kubectl apply -f infra/manifests/onboarding/gitea-onboarding-admin-token.template.yaml
 helmfile -f infra/helm/helmfile.yaml -l phase=onboarding apply
 ```
 
-10. Install the standalone Open Mercato release when you want the cluster to
+11. Install the standalone Open Mercato release when you want the cluster to
 host a first-party CRM instance next to onboarding:
 
 ```bash
 helmfile -f infra/helm/helmfile.yaml -l phase=openmercato apply
 ```
 
-11. After the first Open Mercato pod finishes `yarn initialize`, mint a scoped
+12. After the first Open Mercato pod finishes `yarn initialize`, mint a scoped
 billing bridge API key and update the onboarding secret with it:
 
 ```bash
@@ -188,7 +226,7 @@ identifiers into `OPENMERCATO_CUSTOMER_TENANT_ID` and
 deployment so signup and billing CRM sync use the same scoped bridge
 credential.
 
-12. After `cert-manager` is installed, apply the certificate issuers:
+13. After `cert-manager` is installed, apply the certificate issuers:
 
 ```bash
 kubectl apply -f infra/manifests/cert-manager/clusterissuer-letsencrypt-http.yaml
@@ -219,6 +257,7 @@ kubectl get nodes -L node-pool,node-type,workload-type
 kubectl get pods -n cert-manager -o wide
 kubectl get crds | grep cert-manager
 kubectl get statefulset -n mercato-sandboxes | grep postgres-
+kubectl get storageclass hcloud-volumes
 kubectl get storageclass local-path
 kubectl get pods -n mercato-sandboxes -o wide
 kubectl get jobs -n mercato-sandboxes

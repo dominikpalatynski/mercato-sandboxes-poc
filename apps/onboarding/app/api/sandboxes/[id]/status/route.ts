@@ -1,24 +1,11 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { and, eq } from 'drizzle-orm';
+
+import { db } from '@/lib/db';
+import { sandboxes, users } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { buildLinks, coderPublicUrl, getWorkspaceStatus, resolveAppUrl } from '@/lib/coder';
-import type { SandboxPresetId } from '@/lib/sandbox-presets';
-
-interface SandboxRow {
-  id: string;
-  user_id: string;
-  name: string;
-  preset_id: SandboxPresetId;
-  coder_workspace_id: string | null;
-  status: string;
-  status_message: string | null;
-  vscode_url: string | null;
-  terminal_url: string | null;
-  app_url: string | null;
-  splash_url: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import { toApiSandbox } from '@/lib/api-mappers';
 
 export async function GET(
   req: Request,
@@ -33,47 +20,55 @@ export async function GET(
   }
   const { id } = await ctx.params;
 
-  const result = await query<SandboxRow>(
-    `select id, user_id, name, preset_id, coder_workspace_id, status, status_message,
-            vscode_url, terminal_url, app_url, splash_url, created_at, updated_at
-       from sandboxes
-      where id = $1 and user_id = $2`,
-    [id, session.sub],
-  );
-  const sandbox = result.rows[0];
+  const [sandbox] = await db
+    .select()
+    .from(sandboxes)
+    .where(and(eq(sandboxes.id, id), eq(sandboxes.userId, session.sub)))
+    .limit(1);
   if (!sandbox) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  // Failed sandboxes are terminal. Ready sandboxes are still re-polled once on
-  // demand so older DB rows can self-heal after routing changes.
+  const [userRow] = await db
+    .select({
+      githubLogin: users.githubLogin,
+      githubInstallationId: users.githubInstallationId,
+    })
+    .from(users)
+    .where(eq(users.id, session.sub))
+    .limit(1);
+  const githubLink = {
+    github_login: userRow?.githubLogin ?? null,
+    github_installation_id: userRow?.githubInstallationId ?? null,
+  };
+
   if (sandbox.status === 'failed') {
-    return NextResponse.json(sandbox);
+    return NextResponse.json({ ...toApiSandbox(sandbox), ...githubLink });
   }
 
-  if (!sandbox.coder_workspace_id) {
-    return NextResponse.json(sandbox);
+  if (!sandbox.coderWorkspaceId) {
+    return NextResponse.json({ ...toApiSandbox(sandbox), ...githubLink });
   }
 
   let cs;
   try {
-    cs = await getWorkspaceStatus(sandbox.coder_workspace_id);
+    cs = await getWorkspaceStatus(sandbox.coderWorkspaceId);
   } catch (e) {
-    // Transient API errors — return current row, will retry next poll.
     return NextResponse.json({
-      ...sandbox,
+      ...toApiSandbox(sandbox),
+      ...githubLink,
       status_message: `Polling Coder failed: ${String(e).slice(0, 200)}`,
     });
   }
 
   let newStatus = sandbox.status;
-  let newMessage = sandbox.status_message ?? '';
-  let newVscode = sandbox.vscode_url;
-  let newTerminal = sandbox.terminal_url;
-  let newApp = sandbox.app_url;
-  let newSplash = sandbox.splash_url;
+  let newMessage = sandbox.statusMessage ?? '';
+  let newVscode = sandbox.vscodeUrl;
+  let newTerminal = sandbox.terminalUrl;
+  let newApp = sandbox.appUrl;
+  let newSplash = sandbox.splashUrl;
   const hasPublishedLinks = Boolean(
-    sandbox.vscode_url || sandbox.terminal_url || sandbox.app_url || sandbox.splash_url,
+    sandbox.vscodeUrl || sandbox.terminalUrl || sandbox.appUrl || sandbox.splashUrl,
   );
 
   const lifecycleReady =
@@ -106,38 +101,48 @@ export async function GET(
       cs.lifecycleState === 'ready'
         ? 'Workspace ready'
         : `Workspace usable (lifecycle: ${cs.lifecycleState})`;
-    // App, splash, and VS Code all come from Coder app metadata.
-    // For subdomain apps we derive the browser-facing host from Coder's
-    // published subdomain name while preserving any path/query from the app URL.
-    // Terminal stays path-based on the main Coder origin.
     newVscode =
-      resolveAppUrl({ apps: cs.apps, slug: 'code-server', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      sandbox.vscode_url;
+      resolveAppUrl({
+        apps: cs.apps,
+        slug: 'code-server',
+        coderPublicUrl,
+        ownerName: cs.ownerName,
+        name: cs.name,
+      }) ?? sandbox.vscodeUrl;
     newApp =
-      resolveAppUrl({ apps: cs.apps, slug: 'app', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      sandbox.app_url;
+      resolveAppUrl({
+        apps: cs.apps,
+        slug: 'app',
+        coderPublicUrl,
+        ownerName: cs.ownerName,
+        name: cs.name,
+      }) ?? sandbox.appUrl;
     newSplash =
-      resolveAppUrl({ apps: cs.apps, slug: 'splash', coderPublicUrl, ownerName: cs.ownerName, name: cs.name }) ??
-      sandbox.splash_url;
+      resolveAppUrl({
+        apps: cs.apps,
+        slug: 'splash',
+        coderPublicUrl,
+        ownerName: cs.ownerName,
+        name: cs.name,
+      }) ?? sandbox.splashUrl;
     newTerminal = buildLinks({ coderPublicUrl, ownerName: cs.ownerName, name: cs.name }).terminal;
   } else {
     newStatus = 'building';
     newMessage = `job=${cs.jobStatus}${cs.lifecycleState ? `, lifecycle=${cs.lifecycleState}` : ''}`;
   }
 
-  const updated = await query<SandboxRow>(
-    `update sandboxes
-        set status = $1,
-            status_message = $2,
-            vscode_url = $3,
-            terminal_url = $4,
-            app_url = $5,
-            splash_url = $6,
-            updated_at = now()
-      where id = $7
-      returning id, user_id, name, preset_id, coder_workspace_id, status, status_message,
-                vscode_url, terminal_url, app_url, splash_url, created_at, updated_at`,
-    [newStatus, newMessage, newVscode, newTerminal, newApp, newSplash, sandbox.id],
-  );
-  return NextResponse.json(updated.rows[0] ?? sandbox);
+  const [updated] = await db
+    .update(sandboxes)
+    .set({
+      status: newStatus,
+      statusMessage: newMessage,
+      vscodeUrl: newVscode,
+      terminalUrl: newTerminal,
+      appUrl: newApp,
+      splashUrl: newSplash,
+      updatedAt: new Date(),
+    })
+    .where(eq(sandboxes.id, sandbox.id))
+    .returning();
+  return NextResponse.json({ ...toApiSandbox(updated ?? sandbox), ...githubLink });
 }

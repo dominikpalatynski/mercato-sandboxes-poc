@@ -33,6 +33,7 @@ import ProvisioningConsole from '@/components/provisioning-console';
 import WorkspaceStats from '@/components/workspace-stats';
 import { getSandboxPreset, type SandboxPresetId } from '@/lib/sandbox-presets';
 import { cn } from '@/lib/utils';
+import RepoCard from './repo-card';
 
 export interface SandboxView {
   id: string;
@@ -47,6 +48,14 @@ export interface SandboxView {
   // Set on the server when rendering the page; safe to expose (already in DB).
   coder_owner_name?: string | null;
   coder_workspace_name?: string | null;
+  // Repo/origin state — kept fresh by the status poller so the RepoCard
+  // re-renders the moment migration finishes server-side.
+  repo_origin?: string;
+  gitea_clone_url?: string | null;
+  github_repo_full_name?: string | null;
+  github_clone_url?: string | null;
+  github_login?: string | null;
+  github_installation_id?: string | null;
 }
 
 interface Props {
@@ -138,6 +147,12 @@ export default function StatusPoller({
         preset_id: data.preset_id ?? prev.preset_id,
         coder_owner_name: prev.coder_owner_name ?? data.coder_owner_name ?? null,
         coder_workspace_name: prev.coder_workspace_name ?? data.coder_workspace_name ?? null,
+        repo_origin: data.repo_origin ?? prev.repo_origin,
+        gitea_clone_url: data.gitea_clone_url ?? prev.gitea_clone_url ?? null,
+        github_repo_full_name: data.github_repo_full_name ?? prev.github_repo_full_name ?? null,
+        github_clone_url: data.github_clone_url ?? prev.github_clone_url ?? null,
+        github_login: data.github_login ?? prev.github_login ?? null,
+        github_installation_id: data.github_installation_id ?? prev.github_installation_id ?? null,
       }));
       return data;
     } catch {
@@ -317,6 +332,29 @@ export default function StatusPoller({
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           {actionError}
         </div>
+      )}
+
+      {/* Repo / GitHub handover card. Available whenever the workspace is in
+          a stable state — building/failed hide it because the Gitea repo may
+          not exist yet. */}
+      {(sandbox.status === 'ready' || sandbox.status === 'stopped') && (
+        <RepoCard
+          sandboxId={initial.id}
+          repoOrigin={sandbox.repo_origin ?? 'gitea'}
+          giteaCloneUrl={sandbox.gitea_clone_url ?? null}
+          githubRepoFullName={sandbox.github_repo_full_name ?? null}
+          githubCloneUrl={sandbox.github_clone_url ?? null}
+          githubLogin={sandbox.github_login ?? null}
+          githubInstallationId={sandbox.github_installation_id ?? null}
+          onMigrated={(next) =>
+            setSandbox((prev) => ({
+              ...prev,
+              repo_origin: 'github',
+              github_repo_full_name: next.githubRepoFullName,
+              github_clone_url: next.githubCloneUrl,
+            }))
+          }
+        />
       )}
 
       {/* Ready state */}

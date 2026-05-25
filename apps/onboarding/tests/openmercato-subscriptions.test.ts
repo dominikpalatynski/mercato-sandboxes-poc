@@ -3,10 +3,12 @@ import test from 'node:test';
 
 import {
   createSubscriptionCheckout,
+  createSubscriptionPortal,
   getSubscriptionAccess,
   hasGrantedAccess,
   readEntitlementsView,
   SUBSCRIPTION_SUBJECT_ENTITY_TYPE,
+  type OpenMercatoSubscriptionsClientDependencies,
   type SubscriptionAccessSnapshot,
 } from '../lib/openmercato-subscriptions';
 
@@ -33,7 +35,7 @@ test('createSubscriptionCheckout posts to OM subscriptions endpoint with subject
       successUrl: 'https://app.example/billing?status=success',
       cancelUrl: 'https://app.example/billing?status=cancelled',
     },
-    { client },
+    { client: client as OpenMercatoSubscriptionsClientDependencies['client'] },
   );
 
   assert.equal(result.provider, 'stripe');
@@ -75,12 +77,43 @@ test('createSubscriptionCheckout forwards explicit priceCode and metadata', asyn
       cancelUrl: 'https://app.example/billing?status=cancelled',
       metadata: { trace: 'abc' },
     },
-    { client },
+    { client: client as OpenMercatoSubscriptionsClientDependencies['client'] },
   );
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.body.priceCode, 'premium-monthly-pln-v1');
   assert.deepEqual(calls[0]!.body.metadata, { trace: 'abc' });
+});
+
+test('createSubscriptionPortal posts to OM subscriptions portal endpoint', async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = {
+    async get() {
+      throw new Error('get should not be called');
+    },
+    async post(path: string, body?: Record<string, unknown>) {
+      calls.push({ path, body: body ?? {} });
+      return {
+        portalUrl: 'https://billing.stripe.com/session/abc',
+      };
+    },
+  };
+
+  const result = await createSubscriptionPortal(
+    {
+      externalAccountId: 'user-abc',
+      returnUrl: 'https://app.example/billing',
+    },
+    { client: client as OpenMercatoSubscriptionsClientDependencies['client'] },
+  );
+
+  assert.equal(result.portalUrl, 'https://billing.stripe.com/session/abc');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.path, '/api/subscriptions/portal');
+  assert.deepEqual(calls[0]!.body, {
+    externalAccountId: 'user-abc',
+    returnUrl: 'https://app.example/billing',
+  });
 });
 
 test('getSubscriptionAccess queries the OM access endpoint with defaults', async () => {
@@ -111,7 +144,10 @@ test('getSubscriptionAccess queries the OM access endpoint with defaults', async
     },
   };
 
-  const result = await getSubscriptionAccess({ externalAccountId: 'user-abc' }, { client });
+  const result = await getSubscriptionAccess(
+    { externalAccountId: 'user-abc' },
+    { client: client as OpenMercatoSubscriptionsClientDependencies['client'] },
+  );
   assert.equal(result.accessState, 'granted');
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.path, '/api/subscriptions/access');

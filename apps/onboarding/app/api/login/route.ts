@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { query } from '@/lib/db';
+
+import { db } from '@/lib/db';
+import { users } from '@/db/schema';
 import {
   verifyPassword,
   signSession,
@@ -27,15 +30,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const email = parsed.data.email.toLowerCase().trim();
 
-  const result = await query<{ id: string; email: string; password_hash: string }>(
-    'select id, email, password_hash from users where email = $1',
-    [email],
-  );
-  const user = result.rows[0];
+  const [user] = await db
+    .select({ id: users.id, email: users.email, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
   if (!user) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
-  const ok = await verifyPassword(parsed.data.password, user.password_hash);
+  const ok = await verifyPassword(parsed.data.password, user.passwordHash);
   if (!ok) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }

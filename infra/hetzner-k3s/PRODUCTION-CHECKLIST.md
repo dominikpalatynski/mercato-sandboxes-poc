@@ -53,7 +53,14 @@ Do not use [cluster.example.yaml](/Users/dpalatynski/Private/OpenMercato/mercato
 - [ ] Replace placeholder IP/CIDRs in `networking.allowed_networks`
 - [ ] Confirm `cluster_name`
 - [ ] Confirm Hetzner location, currently `fsn1`
+- [ ] Set `addons.csi_driver.enabled: true`
+  This is the default storage backend for all durable PVCs (workspace home,
+  workspace sidecar PostgreSQL, `postgres-coder`, `postgres-onboarding`,
+  Gitea). Provided by the Hetzner Cloud CSI driver as the
+  `hcloud-volumes` storage class with native Hetzner replication inside the
+  DC.
 - [ ] Set `addons.local_path_storage_class.enabled: true`
+  Kept for non-durable scratch / cache PVCs only — never for user state.
 
 Recommended minimum for a first real deployment:
 
@@ -74,17 +81,19 @@ Why this matters:
 
 ## 4. Finalize Storage Decisions
 
-- [ ] Confirm that k3s `local-path` remains the intended default storage class
-- [ ] Confirm the team accepts node-local, non-replicated PVCs for the first
-  rollout
-- [ ] Confirm the team accepts manual recovery after loss of the node hosting a
-  PostgreSQL or workspace PVC
-- [ ] Decide whether production should later migrate to a replicated storage
-  backend
+- [ ] Confirm that the Hetzner Cloud CSI driver is the default storage backend
+  for all durable PVCs and that the `hcloud-volumes` storage class exists
+  after addon install
+- [ ] Confirm `local-path` is only used for non-durable scratch / cache PVCs
+- [ ] Confirm the team relies on native Hetzner volume replication inside the
+  `fsn1` DC and accepts that as the only durability layer in MVP
+- [ ] Decide whether production should later add an off-DC backup tier
+  (e.g. S3 `pg_dump` and `gitea dump`)
 
 Before real user traffic:
 
-- [ ] Decide on backup and restore strategy for `local-path` volumes
+- [ ] Decide on backup and restore strategy for `hcloud-volumes` PVCs beyond
+  the in-DC replication that ships with the CSI driver
 
 ## 5. Finalize PostgreSQL Topology
 
@@ -249,6 +258,7 @@ Point all of these at the Traefik LB IP:
 
   ```bash
   kubectl get pods -n cert-manager -o wide
+  kubectl get storageclass hcloud-volumes
   kubectl get storageclass local-path
   ```
 
@@ -390,7 +400,7 @@ Secret alone is not enough once the data directory already exists.
 - [ ] `coder` and `onboarding` stay Ready after their DB-backed startup
 - [ ] `https://coder.sandbox.palatynskicloud.com` loads
 - [ ] A workspace lands on `node-pool=sandbox`
-- [ ] Workspace PVCs bind to `local-path`
+- [ ] Workspace PVCs bind to `hcloud-volumes`
 - [ ] Coder terminal works
 - [ ] VS Code via wildcard URL works
 - [ ] App on port `3000` works

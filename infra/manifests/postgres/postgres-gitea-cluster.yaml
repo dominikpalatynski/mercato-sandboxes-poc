@@ -1,0 +1,137 @@
+# Legacy filename retained to match the postgres-coder / postgres-onboarding split.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-gitea
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/name: postgres-gitea
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mercato-sandboxes
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres-gitea
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-gitea-rw
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/name: postgres-gitea
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mercato-sandboxes
+spec:
+  selector:
+    app.kubernetes.io/name: postgres-gitea
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-gitea
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/name: postgres-gitea
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mercato-sandboxes
+spec:
+  serviceName: postgres-gitea
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-gitea
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-gitea
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: mercato-sandboxes
+    spec:
+      nodeSelector:
+        node-pool: system
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: system
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: gitea
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-gitea-app
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-gitea-app
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: postgres-gitea
+          app.kubernetes.io/component: database
+          app.kubernetes.io/part-of: mercato-sandboxes
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: hcloud-volumes
+        resources:
+          requests:
+            storage: 10Gi

@@ -8,7 +8,7 @@ coder:
   publicUrl: "https://coder.sandbox.example.com"
   internalUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
   organization: ""
-  cliVersion: "2.30.0"
+  cliVersion: "2.33.2"
   templateName: "mercato-k8s"
   tokenName: "onboarding-app-k8s"
   tokenLifetimeNanoseconds: "31536000000000000"

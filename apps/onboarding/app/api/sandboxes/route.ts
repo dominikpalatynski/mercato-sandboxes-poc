@@ -1,26 +1,18 @@
 import { NextResponse } from 'next/server';
+import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { query } from '@/lib/db';
+
+import { db } from '@/lib/db';
+import { sandboxes } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
-import { ensureCoderUser, createWorkspace, CoderApiError } from '@/lib/coder';
-import { assertActiveSandboxEntitlement, OmBillingError } from '@/lib/om-billing';
+import { OmBillingError } from '@/lib/om-billing';
 import {
   ACTIVE_SANDBOX_PRESET_IDS,
   DEFAULT_SANDBOX_PRESET,
   type CreatableSandboxPresetId,
-  type SandboxPresetId,
 } from '@/lib/sandbox-presets';
-
-interface SandboxListRow {
-  id: string;
-  name: string;
-  preset_id: SandboxPresetId;
-  status: string;
-  status_message: string | null;
-  coder_workspace_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import { SandboxQuotaError } from '@/lib/sandbox-quota';
+import { sandboxService, SandboxProvisioningError } from '@/lib/sandbox-service';
 
 export async function GET(req: Request): Promise<NextResponse> {
   let session;
@@ -30,13 +22,20 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (resp instanceof NextResponse) return resp;
     throw resp;
   }
-  const { rows } = await query<SandboxListRow>(
-    `select id, name, preset_id, status, status_message, coder_workspace_id, created_at, updated_at
-       from sandboxes
-      where user_id = $1
-      order by created_at desc`,
-    [session.sub],
-  );
+  const rows = await db
+    .select({
+      id: sandboxes.id,
+      name: sandboxes.name,
+      preset_id: sandboxes.presetId,
+      status: sandboxes.status,
+      status_message: sandboxes.statusMessage,
+      coder_workspace_id: sandboxes.coderWorkspaceId,
+      created_at: sandboxes.createdAt,
+      updated_at: sandboxes.updatedAt,
+    })
+    .from(sandboxes)
+    .where(eq(sandboxes.userId, session.sub))
+    .orderBy(desc(sandboxes.createdAt));
   return NextResponse.json({ sandboxes: rows });
 }
 
@@ -47,12 +46,29 @@ const Body = z.object({
   preset_id: z.enum(ACTIVE_SANDBOX_PRESET_IDS).default(DEFAULT_SANDBOX_PRESET),
 });
 
-interface UserRow {
-  id: string;
-  email: string;
-  coder_user_id: string | null;
-  coder_username: string | null;
-  coder_temp_password: string | null;
+function billingErrorResponse(error: OmBillingError): NextResponse {
+  return NextResponse.json(
+    { error: error.message, code: error.code },
+    { status: error.status },
+  );
+}
+
+function quotaErrorResponse(error: SandboxQuotaError): NextResponse {
+  return NextResponse.json(
+    {
+      error: error.message,
+      code: error.code,
+      quota: error.quota,
+    },
+    { status: error.status },
+  );
+}
+
+function provisioningErrorResponse(error: SandboxProvisioningError): NextResponse {
+  return NextResponse.json(
+    { id: error.sandboxId, error: error.message },
+    { status: error.status },
+  );
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -81,75 +97,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   const presetId: CreatableSandboxPresetId = parsed.data.preset_id;
 
   try {
-    await assertActiveSandboxEntitlement(session.sub);
+    const result = await sandboxService.createSandbox({
+      userId: session.sub,
+      name,
+      presetId,
+    });
+    return NextResponse.json({ id: result.id }, { status: 201 });
   } catch (error) {
+    if (error instanceof SandboxQuotaError) {
+      return quotaErrorResponse(error);
+    }
+    if (error instanceof SandboxProvisioningError) {
+      return provisioningErrorResponse(error);
+    }
     if (error instanceof OmBillingError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: error.status },
-      );
+      return billingErrorResponse(error);
     }
     throw error;
   }
-
-  // Load user.
-  const userResult = await query<UserRow>(
-    'select id, email, coder_user_id, coder_username, coder_temp_password from users where id = $1',
-    [session.sub],
-  );
-  const user = userResult.rows[0];
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
-  }
-
-  // Provision Coder user if needed.
-  let coderUserId = user.coder_user_id;
-  if (!coderUserId) {
-    try {
-      const created = await ensureCoderUser(user.email);
-      await query(
-        'update users set coder_user_id = $1, coder_username = $2, coder_temp_password = $3 where id = $4',
-        [created.id, created.username, created.tempPassword, user.id],
-      );
-      coderUserId = created.id;
-    } catch (e) {
-      return NextResponse.json(
-        { error: `Failed to create Coder user: ${String(e).slice(0, 500)}` },
-        { status: 500 },
-      );
-    }
-  }
-
-  // Insert sandbox row in 'building' state.
-  const inserted = await query<{ id: string }>(
-    `insert into sandboxes (user_id, name, preset_id, status, status_message)
-     values ($1, $2, $3, 'building', $4)
-     returning id`,
-    [user.id, name, presetId, 'Creating workspace…'],
-  );
-  const dbSandboxId = inserted.rows[0]?.id;
-  if (!dbSandboxId) {
-    return NextResponse.json({ error: 'Failed to create sandbox row' }, { status: 500 });
-  }
-
-  try {
-    const ws = await createWorkspace(coderUserId, name, { sandboxPreset: presetId });
-    await query(
-      `update sandboxes
-          set coder_workspace_id = $1, status_message = $2, updated_at = now()
-        where id = $3`,
-      [ws.id, 'Provisioning…', dbSandboxId],
-    );
-  } catch (e) {
-    const errorMessage = e instanceof CoderApiError ? e.body || e.message : String(e);
-    await query(
-      `update sandboxes
-          set status = 'failed', status_message = $1, updated_at = now()
-        where id = $2`,
-      [errorMessage.slice(0, 500), dbSandboxId],
-    );
-    return NextResponse.json({ id: dbSandboxId, error: String(e) }, { status: 500 });
-  }
-
-  return NextResponse.json({ id: dbSandboxId }, { status: 201 });
 }

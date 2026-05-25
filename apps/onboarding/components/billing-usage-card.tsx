@@ -38,6 +38,13 @@ function formatAccessState(state: string | null | undefined): string {
   return state;
 }
 
+function formatSandboxQuota(quota: OmBillingSummary['sandboxQuota']): string {
+  if (!quota.valid || quota.limit === null) {
+    return 'n/a';
+  }
+  return `${quota.used}/${quota.limit}`;
+}
+
 export function BillingUsageCard({ initialSummary }: Props): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,25 +56,28 @@ export function BillingUsageCard({ initialSummary }: Props): React.ReactElement 
     ?? 'basic-sandbox';
   const hasAnySubscription = Boolean(initialSummary.accessSnapshot?.subscriptionId);
 
-  async function startCheckout(): Promise<void> {
+  async function startBillingAction(): Promise<void> {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/billing/checkout', {
+      const actionUrl = hasAnySubscription ? '/api/billing/portal' : '/api/billing/checkout';
+      const res = await fetch(actionUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       const data = (await res.json().catch(() => ({}))) as {
         checkout_url?: string;
+        portal_url?: string;
         error?: string;
       };
-      if (!res.ok || !data.checkout_url) {
+      const redirectUrl = hasAnySubscription ? data.portal_url : data.checkout_url;
+      if (!res.ok || !redirectUrl) {
         setError(data.error || `HTTP ${res.status}`);
         setBusy(false);
         return;
       }
-      window.location.assign(data.checkout_url);
+      window.location.assign(redirectUrl);
     } catch (err) {
       setError(String(err));
       setBusy(false);
@@ -112,6 +122,14 @@ export function BillingUsageCard({ initialSummary }: Props): React.ReactElement 
             </div>
             <div className="mt-1 text-sm font-medium text-foreground">
               {formatUsd(entitlements.openRouterTokensUsageUsd)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Sandboxes
+            </div>
+            <div className="mt-1 text-sm font-medium text-foreground">
+              {formatSandboxQuota(initialSummary.sandboxQuota)}
             </div>
           </div>
           <div className="rounded-lg border border-border bg-muted/40 p-3">
@@ -170,15 +188,18 @@ export function BillingUsageCard({ initialSummary }: Props): React.ReactElement 
 
         {!initialSummary.canCreateSandbox ? (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900">
-            Sandbox creation stays blocked until Open Mercato confirms your subscription is granted
-            and your AI access is provisioned.
+            {initialSummary.sandboxQuota.valid && initialSummary.sandboxQuota.reached
+              ? 'Your current plan sandbox limit is reached. Delete an existing sandbox or update the subscription before creating another one.'
+              : 'Sandbox creation stays blocked until Open Mercato confirms your subscription is granted, your AI access is provisioned, and your plan exposes a valid sandbox limit.'}
           </div>
         ) : null}
 
         <div className="flex gap-2">
-          <Button type="button" disabled={busy} onClick={startCheckout}>
+          <Button type="button" disabled={busy} onClick={startBillingAction}>
             {busy
-              ? 'Redirecting to checkout…'
+              ? hasAnySubscription
+                ? 'Redirecting to billing portal…'
+                : 'Redirecting to checkout…'
               : hasAnySubscription
                 ? 'Manage subscription'
                 : 'Subscribe'}

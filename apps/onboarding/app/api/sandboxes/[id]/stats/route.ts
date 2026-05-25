@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { and, eq } from 'drizzle-orm';
+
+import { db } from '@/lib/db';
+import { sandboxes } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { getWorkspaceMetadata } from '@/lib/coder';
-
-interface SandboxRow {
-  id: string;
-  coder_workspace_id: string | null;
-  status: string;
-}
 
 export async function GET(
   req: Request,
@@ -22,20 +19,20 @@ export async function GET(
   }
   const { id } = await ctx.params;
 
-  const result = await query<SandboxRow>(
-    'select id, coder_workspace_id, status from sandboxes where id = $1 and user_id = $2',
-    [id, session.sub],
-  );
-  const sandbox = result.rows[0];
+  const [sandbox] = await db
+    .select({ coderWorkspaceId: sandboxes.coderWorkspaceId })
+    .from(sandboxes)
+    .where(and(eq(sandboxes.id, id), eq(sandboxes.userId, session.sub)))
+    .limit(1);
   if (!sandbox) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  if (!sandbox.coder_workspace_id) {
+  if (!sandbox.coderWorkspaceId) {
     return NextResponse.json({ cpu: null, memory: null, diskHome: null });
   }
 
   try {
-    const md = await getWorkspaceMetadata(sandbox.coder_workspace_id);
+    const md = await getWorkspaceMetadata(sandbox.coderWorkspaceId);
     return NextResponse.json(md);
   } catch (e) {
     return NextResponse.json(

@@ -2,8 +2,7 @@
 # bash scripts/build-and-push-onboarding-image.sh
 image:
   repository: ghcr.io/dominikpalatynski/mercato-onboarding
-  tag: git-205f910v3
-
+  tag: git-c50080ev8
 imagePullSecrets:
   - name: ghcr-pull
 
@@ -14,12 +13,24 @@ env:
     value: ".sandbox.palatynskicloud.com"
   - name: BILLING_BACKEND
     value: "openmercato"
+  - name: ONBOARDING_PUBLIC_URL
+    value: "https://sandbox.palatynskicloud.com"
   - name: CODER_URL
     value: "http://coder.mercato-sandboxes.svc.cluster.local"
   - name: CODER_PUBLIC_URL
     value: "https://coder.sandbox.palatynskicloud.com"
   - name: WILDCARD_APPS_DOMAIN
     value: "apps.sandbox.palatynskicloud.com"
+  - name: GITEA_API_URL
+    value: "http://gitea-http.gitea.svc.cluster.local:3000"
+  - name: GITEA_PUBLIC_URL
+    value: "https://gitea.sandbox.palatynskicloud.com"
+  - name: WORKSPACE_NAMESPACE
+    value: "mercato-sandboxes"
+  # Trust the in-cluster CA so global fetch can talk to the Kubernetes API
+  # server when creating/updating workspace-credentials Secrets.
+  - name: NODE_EXTRA_CA_CERTS
+    value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
   - name: OPENMERCATO_API_BASE_URL
     value: "https://crm.sandbox.palatynskicloud.com"
   - name: OPENMERCATO_BILLING_WEBHOOK_TOLERANCE_SECONDS
@@ -35,6 +46,15 @@ secretEnv:
   - name: POSTGRES_URL
     secretName: onboarding-app-secrets
     secretKey: POSTGRES_URL
+  - name: GITHUB_APP_ID
+    secretName: github-app-credentials
+    secretKey: app-id
+  - name: GITHUB_APP_SLUG
+    secretName: github-app-credentials
+    secretKey: app-slug
+  - name: GITHUB_APP_WEBHOOK_SECRET
+    secretName: github-app-credentials
+    secretKey: webhook-secret
   - name: JWT_SECRET
     secretName: onboarding-app-secrets
     secretKey: JWT_SECRET
@@ -62,6 +82,9 @@ secretEnv:
   - name: OPENMERCATO_BILLING_WEBHOOK_SECRET
     secretName: onboarding-app-secrets
     secretKey: OPENMERCATO_BILLING_WEBHOOK_SECRET
+  - name: OM_BILLING_WEBHOOK_SECRET
+    secretName: onboarding-app-secrets
+    secretKey: OPENMERCATO_BILLING_WEBHOOK_SECRET
 
 fileSecrets:
   - name: coder-admin-token
@@ -76,6 +99,18 @@ fileSecrets:
     secretKey: template-id
     mountPath: /run/secrets/coder-template
     fileName: template-id
+  - name: gitea-admin-token
+    envName: GITEA_ADMIN_TOKEN_FILE
+    secretName: gitea-onboarding-admin-token
+    secretKey: token
+    mountPath: /run/secrets/gitea-admin
+    fileName: token
+  - name: github-app-private-key
+    envName: GITHUB_APP_PRIVATE_KEY_FILE
+    secretName: github-app-private-key
+    secretKey: private-key.pem
+    mountPath: /run/secrets/github-app
+    fileName: private-key.pem
 
 databaseMigration:
   enabled: true

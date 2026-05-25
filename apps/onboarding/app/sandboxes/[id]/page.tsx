@@ -1,34 +1,14 @@
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { notFound } from 'next/navigation';
+import { and, eq } from 'drizzle-orm';
 
 import { requireSession } from '@/lib/auth';
-import { query } from '@/lib/db';
+import { db } from '@/lib/db';
+import { sandboxes, users } from '@/db/schema';
 import { Button } from '@/components/ui/button';
 import StatusPoller, { type SandboxView } from './status-poller';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
-
-interface SandboxRow {
-  id: string;
-  user_id: string;
-  name: string;
-  preset_id: SandboxPresetId;
-  coder_workspace_id: string | null;
-  status: string;
-  status_message: string | null;
-  vscode_url: string | null;
-  terminal_url: string | null;
-  app_url: string | null;
-  splash_url: string | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
-interface UserCreds {
-  email: string;
-  coder_temp_password: string | null;
-  coder_username: string | null;
-}
 
 export const dynamic = 'force-dynamic';
 
@@ -43,34 +23,43 @@ export default async function SandboxDetailPage({
   const session = await requireSession();
   const { id } = await params;
 
-  const result = await query<SandboxRow>(
-    `select id, user_id, name, preset_id, coder_workspace_id, status, status_message,
-            vscode_url, terminal_url, app_url, splash_url, created_at, updated_at
-       from sandboxes
-      where id = $1 and user_id = $2`,
-    [id, session.sub],
-  );
-  const sandbox = result.rows[0];
+  const [sandbox] = await db
+    .select()
+    .from(sandboxes)
+    .where(and(eq(sandboxes.id, id), eq(sandboxes.userId, session.sub)))
+    .limit(1);
   if (!sandbox) notFound();
 
-  const userResult = await query<UserCreds>(
-    'select email, coder_temp_password, coder_username from users where id = $1',
-    [session.sub],
-  );
-  const user = userResult.rows[0];
+  const [user] = await db
+    .select({
+      email: users.email,
+      coderTempPassword: users.coderTempPassword,
+      coderUsername: users.coderUsername,
+      githubLogin: users.githubLogin,
+      githubInstallationId: users.githubInstallationId,
+    })
+    .from(users)
+    .where(eq(users.id, session.sub))
+    .limit(1);
 
   const initial: SandboxView = {
     id: sandbox.id,
     name: sandbox.name,
-    preset_id: sandbox.preset_id,
+    preset_id: sandbox.presetId as SandboxPresetId,
     status: sandbox.status,
-    status_message: sandbox.status_message,
-    vscode_url: sandbox.vscode_url,
-    terminal_url: sandbox.terminal_url,
-    app_url: sandbox.app_url,
-    splash_url: sandbox.splash_url,
-    coder_owner_name: user?.coder_username ?? null,
+    status_message: sandbox.statusMessage,
+    vscode_url: sandbox.vscodeUrl,
+    terminal_url: sandbox.terminalUrl,
+    app_url: sandbox.appUrl,
+    splash_url: sandbox.splashUrl,
+    coder_owner_name: user?.coderUsername ?? null,
     coder_workspace_name: sandbox.name,
+    repo_origin: sandbox.repoOrigin,
+    gitea_clone_url: sandbox.giteaCloneUrl,
+    github_repo_full_name: sandbox.githubRepoFullName,
+    github_clone_url: sandbox.githubCloneUrl,
+    github_login: user?.githubLogin ?? null,
+    github_installation_id: user?.githubInstallationId ?? null,
   };
 
   return (
@@ -84,7 +73,7 @@ export default async function SandboxDetailPage({
       <StatusPoller
         initial={initial}
         coderEmail={user?.email ?? session.email}
-        coderTempPassword={user?.coder_temp_password ?? null}
+        coderTempPassword={user?.coderTempPassword ?? null}
         coderPublicUrl={coderPublicUrl}
       />
     </div>

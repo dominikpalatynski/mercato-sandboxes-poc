@@ -7,6 +7,8 @@ helmDefaults:
 repositories:
   - name: coder-v2
     url: https://helm.coder.com/v2
+  - name: gitea-charts
+    url: https://dl.gitea.com/charts/
 
 releases:
   - name: cert-manager
@@ -19,13 +21,25 @@ releases:
     values:
       - values/cert-manager.yaml
 
+  - name: gitea
+    labels:
+      phase: gitea
+    namespace: gitea
+    createNamespace: true
+    needs:
+      - cert-manager/cert-manager
+    chart: gitea-charts/gitea
+    version: 12.4.0
+    values:
+      - values/gitea.yaml
+
   - name: coder
     labels:
       phase: coder
     namespace: mercato-sandboxes
     createNamespace: true
     chart: coder-v2/coder
-    version: 2.30.0
+    version: 2.33.2
     values:
       - values/coder.yaml
 
@@ -47,6 +61,7 @@ releases:
     createNamespace: true
     needs:
       - mercato-sandboxes/coder-bootstrap
+      - gitea/gitea
     chart: ./charts/onboarding
     values:
       - values/onboarding.yaml

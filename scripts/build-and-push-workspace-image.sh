@@ -32,7 +32,7 @@ GHCR_OWNER="${GHCR_OWNER:-dominikpalatynski}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
 IMAGE_TAG="${IMAGE_TAG:-git-$(git rev-parse --short HEAD)}"
 WORKSPACE_IMAGE_REPOSITORY="${WORKSPACE_IMAGE_REPOSITORY:-ghcr.io/${GHCR_OWNER}/mercato-workspace}"
-IMAGE_REF="${WORKSPACE_IMAGE_REPOSITORY}:${IMAGE_TAG}"
+IMAGE_REF="${WORKSPACE_IMAGE_REPOSITORY}:${IMAGE_TAG}-v2"
 
 echo "[workspace-image] building ${IMAGE_REF} for ${IMAGE_PLATFORM}..."
 docker buildx build \

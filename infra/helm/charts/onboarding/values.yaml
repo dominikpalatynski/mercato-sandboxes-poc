@@ -3,6 +3,10 @@ replicaCount: 1
 nameOverride: ""
 fullnameOverride: ""
 
+serviceAccount:
+  create: true
+  name: ""
+
 image:
   repository: example.invalid/onboarding
   pullPolicy: IfNotPresent
@@ -37,6 +41,8 @@ env:
     value: "true"
   - name: COOKIE_DOMAIN
     value: ".sandbox.example.com"
+  - name: ONBOARDING_PUBLIC_URL
+    value: "https://sandbox.example.com"
   - name: CODER_URL
     value: "http://coder.mercato-sandboxes.svc.cluster.local"
   - name: CODER_PUBLIC_URL
@@ -63,12 +69,11 @@ fileSecrets: []
 #   mountPath: /run/secrets/coder-admin
 #   fileName: token
 
+# Toggles the init container that runs `tsx db/migrate.ts` against the
+# database before the Next.js server starts. The init container reuses the
+# main app image, so no separate image config is needed.
 databaseMigration:
   enabled: false
-  image:
-    repository: postgres
-    tag: 17-alpine
-    pullPolicy: IfNotPresent
 
 resources:
   requests:

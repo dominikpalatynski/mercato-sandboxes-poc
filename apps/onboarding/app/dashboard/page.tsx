@@ -1,39 +1,38 @@
 import Link from 'next/link';
+import { desc, eq } from 'drizzle-orm';
+
 import { requireSession } from '@/lib/auth';
-import { query } from '@/lib/db';
+import { db } from '@/lib/db';
+import { sandboxes } from '@/db/schema';
 import { getOmBillingSummaryForUser } from '@/lib/om-billing';
 import SandboxCards, { type DashboardSandbox } from './sandbox-cards';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
-
-interface SandboxRow {
-  id: string;
-  name: string;
-  preset_id: SandboxPresetId;
-  status: string;
-  status_message: string | null;
-  created_at: Date;
-}
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage(): Promise<React.ReactElement> {
   const session = await requireSession();
   const billingSummary = await getOmBillingSummaryForUser(session.sub);
-  const { rows } = await query<SandboxRow>(
-    `select id, name, preset_id, status, status_message, created_at
-       from sandboxes
-      where user_id = $1
-      order by created_at desc`,
-    [session.sub],
-  );
+  const rows = await db
+    .select({
+      id: sandboxes.id,
+      name: sandboxes.name,
+      presetId: sandboxes.presetId,
+      status: sandboxes.status,
+      statusMessage: sandboxes.statusMessage,
+      createdAt: sandboxes.createdAt,
+    })
+    .from(sandboxes)
+    .where(eq(sandboxes.userId, session.sub))
+    .orderBy(desc(sandboxes.createdAt));
 
   const initial: DashboardSandbox[] = rows.map((r) => ({
     id: r.id,
     name: r.name,
-    preset_id: r.preset_id,
+    preset_id: r.presetId as SandboxPresetId,
     status: r.status,
-    status_message: r.status_message,
-    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+    status_message: r.statusMessage,
+    created_at: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
   }));
 
   return (
@@ -55,7 +54,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             href="/billing"
             className="rounded border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
-            Open billing to subscribe and activate AI access
+            {billingSummary.sandboxQuota.valid && billingSummary.sandboxQuota.reached
+              ? 'Sandbox limit reached'
+              : 'Open billing to subscribe and activate AI access'}
           </Link>
         )}
       </div>

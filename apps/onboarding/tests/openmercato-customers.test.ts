@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   resolveOpenMercatoCustomerScope,
   syncOpenMercatoSignupCustomer,
+  type OpenMercatoCustomerSyncDependencies,
 } from '../lib/openmercato-customers';
 
 test('resolveOpenMercatoCustomerScope returns null when CRM signup sync env is absent', () => {
@@ -45,7 +46,7 @@ test('syncOpenMercatoSignupCustomer reuses an existing CRM person matched by ema
       lastName: 'Lovelace',
     },
     {
-      client,
+      client: client as OpenMercatoCustomerSyncDependencies['client'],
       env: {
         OPENMERCATO_CUSTOMER_TENANT_ID: 'tenant-1',
         OPENMERCATO_CUSTOMER_ORGANIZATION_ID: 'org-1',
@@ -90,7 +91,7 @@ test('syncOpenMercatoSignupCustomer creates a CRM person with env-provided scope
       lastName: 'Lovelace',
     },
     {
-      client,
+      client: client as OpenMercatoCustomerSyncDependencies['client'],
       env: {
         OPENMERCATO_CUSTOMER_TENANT_ID: 'tenant-1',
         OPENMERCATO_CUSTOMER_ORGANIZATION_ID: 'org-1',

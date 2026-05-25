@@ -17,7 +17,7 @@ export const subscriptionPlans = [
         interval: 'month',
         intervalCount: 1,
         unitAmountMinor: 9900, // 99.00 PLN
-        trialDays: 0,
+        trialDays: null,
         isDefault: true,
         isActive: true,
         stripe: {

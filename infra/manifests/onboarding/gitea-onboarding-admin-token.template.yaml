@@ -1,0 +1,22 @@
+# Admin PAT used by onboarding to call Gitea's admin API
+# (create users/orgs, create repos, mint repo deploy tokens, archive repos).
+#
+# Mint by logging into Gitea as `mercato-admin` (the user from
+# gitea-admin-credentials), then:
+#   Settings → Applications → Manage Access Tokens →
+#     scopes: admin:org, admin:application, repo, user, write:repository.
+#
+# This Secret is mounted into the onboarding pod as a file at
+# `/run/secrets/gitea-admin/token` (see infra/helm/values/onboarding.yaml).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitea-onboarding-admin-token
+  namespace: mercato-sandboxes
+  labels:
+    app.kubernetes.io/part-of: mercato-sandboxes
+type: Opaque
+stringData:
+  # Example only. Replace with a real Gitea PAT generated for `mercato-admin`.
+  # Gitea currently returns a 40-character token; do not commit the real value.
+  token: 0000000000000000000000000000000000000000

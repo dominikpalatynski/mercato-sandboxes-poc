@@ -1,13 +1,10 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import { Pool } from 'pg';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+
+import * as schema from '@/db/schema';
 
 let pool: Pool | null = null;
-
-export interface DatabaseQueryable {
-  query<T extends QueryResultRow = QueryResultRow>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<QueryResult<T>>;
-}
+let drizzleInstance: NodePgDatabase<typeof schema> | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
@@ -20,38 +17,20 @@ export function getPool(): Pool {
   return pool;
 }
 
-export async function query<T extends QueryResultRow = QueryResultRow>(
-  sql: string,
-  params: unknown[] = [],
-): Promise<QueryResult<T>> {
-  const p = getPool();
-  return p.query<T>(sql, params as never[]);
-}
-
-function bindClient(client: PoolClient): DatabaseQueryable {
-  return {
-    query<T extends QueryResultRow = QueryResultRow>(
-      sql: string,
-      params: unknown[] = [],
-    ): Promise<QueryResult<T>> {
-      return client.query<T>(sql, params as never[]);
-    },
-  };
-}
-
-export async function withTransaction<T>(
-  fn: (db: DatabaseQueryable) => Promise<T>,
-): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query('begin');
-    const result = await fn(bindClient(client));
-    await client.query('commit');
-    return result;
-  } catch (error) {
-    await client.query('rollback').catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+export function getDb(): NodePgDatabase<typeof schema> {
+  if (!drizzleInstance) {
+    drizzleInstance = drizzle(getPool(), { schema });
   }
+  return drizzleInstance;
 }
+
+export type Db = NodePgDatabase<typeof schema>;
+export type DbTx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+export const db = new Proxy({} as Db, {
+  get(_target, prop) {
+    const instance = getDb() as unknown as Record<string | symbol, unknown>;
+    const value = instance[prop];
+    return typeof value === 'function' ? (value as Function).bind(instance) : value;
+  },
+});

@@ -1,0 +1,32 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "onboarding.fullname" . }}
+  labels:
+    {{- include "onboarding.labels" . | nindent 4 }}
+rules:
+  # Per-sandbox workspace credentials Secrets are created/updated/deleted by
+  # onboarding when a sandbox is created or migrated to GitHub.
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - create
+      - patch
+      - update
+      - delete
+  # Spawning the GitHub mirror Job during repo handover.
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+{{- end }}
