@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
-import { requireSession } from '@/lib/auth';
+import { requireActiveBilling } from '@/lib/billing-gate';
 import { Button } from '@/components/ui/button';
 import NewSandboxForm from './form';
 import {
@@ -10,7 +10,7 @@ import {
 } from '@/lib/sandbox-presets';
 
 export default async function NewSandboxPage() {
-  await requireSession();
+  await requireActiveBilling();
   const creatablePresets = listCreatableSandboxPresets();
 
   return (

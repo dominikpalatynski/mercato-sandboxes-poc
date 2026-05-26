@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
-import { sandboxes, users } from '@/db/schema';
+import { sandboxes } from '@/db/schema';
 import { requireSessionFromRequest } from '@/lib/auth';
 import { buildLinks, coderPublicUrl, getWorkspaceStatus, resolveAppUrl } from '@/lib/coder';
 import { toApiSandbox } from '@/lib/api-mappers';
@@ -29,25 +29,12 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const [userRow] = await db
-    .select({
-      githubLogin: users.githubLogin,
-      githubInstallationId: users.githubInstallationId,
-    })
-    .from(users)
-    .where(eq(users.id, session.sub))
-    .limit(1);
-  const githubLink = {
-    github_login: userRow?.githubLogin ?? null,
-    github_installation_id: userRow?.githubInstallationId ?? null,
-  };
-
   if (sandbox.status === 'failed') {
-    return NextResponse.json({ ...toApiSandbox(sandbox), ...githubLink });
+    return NextResponse.json(toApiSandbox(sandbox));
   }
 
   if (!sandbox.coderWorkspaceId) {
-    return NextResponse.json({ ...toApiSandbox(sandbox), ...githubLink });
+    return NextResponse.json(toApiSandbox(sandbox));
   }
 
   let cs;
@@ -56,7 +43,6 @@ export async function GET(
   } catch (e) {
     return NextResponse.json({
       ...toApiSandbox(sandbox),
-      ...githubLink,
       status_message: `Polling Coder failed: ${String(e).slice(0, 200)}`,
     });
   }
@@ -144,5 +130,5 @@ export async function GET(
     })
     .where(eq(sandboxes.id, sandbox.id))
     .returning();
-  return NextResponse.json({ ...toApiSandbox(updated ?? sandbox), ...githubLink });
+  return NextResponse.json(toApiSandbox(updated ?? sandbox));
 }

@@ -7,6 +7,7 @@ import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { sandboxes, users } from '@/db/schema';
 import { Button } from '@/components/ui/button';
+import { passwordForOwner } from '@/lib/gitea/client';
 import StatusPoller, { type SandboxView } from './status-poller';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
@@ -35,12 +36,18 @@ export default async function SandboxDetailPage({
       email: users.email,
       coderTempPassword: users.coderTempPassword,
       coderUsername: users.coderUsername,
-      githubLogin: users.githubLogin,
-      githubInstallationId: users.githubInstallationId,
+      giteaOrgName: users.giteaOrgName,
     })
     .from(users)
     .where(eq(users.id, session.sub))
     .limit(1);
+
+  const giteaOrgName = user?.giteaOrgName ?? null;
+  // Deterministic password — same value the bridge route uses to log the
+  // user into Gitea. Exposing it here lets the credentials fallback panel
+  // show a working username/password pair for terminal `git clone` and for
+  // signing into Gitea manually if the auto-bridge fails.
+  const giteaPassword = giteaOrgName ? passwordForOwner(giteaOrgName) : null;
 
   const initial: SandboxView = {
     id: sandbox.id,
@@ -56,10 +63,8 @@ export default async function SandboxDetailPage({
     coder_workspace_name: sandbox.name,
     repo_origin: sandbox.repoOrigin,
     gitea_clone_url: sandbox.giteaCloneUrl,
-    github_repo_full_name: sandbox.githubRepoFullName,
-    github_clone_url: sandbox.githubCloneUrl,
-    github_login: user?.githubLogin ?? null,
-    github_installation_id: user?.githubInstallationId ?? null,
+    gitea_org_name: giteaOrgName,
+    created_at: sandbox.createdAt ? sandbox.createdAt.toISOString() : null,
   };
 
   return (
@@ -75,6 +80,7 @@ export default async function SandboxDetailPage({
         coderEmail={user?.email ?? session.email}
         coderTempPassword={user?.coderTempPassword ?? null}
         coderPublicUrl={coderPublicUrl}
+        giteaPassword={giteaPassword}
       />
     </div>
   );

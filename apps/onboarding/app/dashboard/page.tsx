@@ -1,18 +1,16 @@
 import Link from 'next/link';
 import { desc, eq } from 'drizzle-orm';
 
-import { requireSession } from '@/lib/auth';
+import { requireActiveBilling } from '@/lib/billing-gate';
 import { db } from '@/lib/db';
 import { sandboxes } from '@/db/schema';
-import { getOmBillingSummaryForUser } from '@/lib/om-billing';
 import SandboxCards, { type DashboardSandbox } from './sandbox-cards';
 import type { SandboxPresetId } from '@/lib/sandbox-presets';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage(): Promise<React.ReactElement> {
-  const session = await requireSession();
-  const billingSummary = await getOmBillingSummaryForUser(session.sub);
+  const { session, summary: billingSummary } = await requireActiveBilling();
   const rows = await db
     .select({
       id: sandboxes.id,

@@ -76,11 +76,19 @@ export interface GiteaRepoToken {
   sha1: string;
 }
 
-function orgNameForUser(userId: string): string {
-  // Gitea owner names are limited to 40 chars. A UUID plus `user-` is 41 when
-  // hyphens are kept, so strip separators and clamp any non-UUID fallback.
-  const id = userId.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 35);
-  return `user-${id}`;
+function buildOrgName(email: string, userId: string): string {
+  // Gitea owner names: <=40 chars, [a-zA-Z0-9._-], can't start with `-`.
+  // Use the email local-part as the human-readable base and an HMAC(userId)
+  // suffix so two users sharing a local-part still get distinct, deterministic
+  // org names. Falls back to `user` if the local-part has no usable chars.
+  const local = (email.split('@')[0] || '').toLowerCase();
+  const baseRaw = local.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  const base = baseRaw || 'user';
+  const suffix = createHmac('sha256', 'mercato-gitea-org')
+    .update(userId)
+    .digest('hex')
+    .slice(0, 4);
+  return `${base}-${suffix}`;
 }
 
 function isAlreadyExistsError(error: unknown): error is GiteaApiError {
@@ -146,7 +154,7 @@ export async function createUserOrg(input: {
   email: string;
   fullName?: string;
 }): Promise<GiteaOrgRef> {
-  const giteaUsername = orgNameForUser(input.userId);
+  const giteaUsername = buildOrgName(input.email, input.userId);
 
   try {
     const created = await giteaFetch<{ id: number; username: string }>('/api/v1/admin/users', {
@@ -259,4 +267,4 @@ export async function archiveRepo(orgName: string, repoName: string): Promise<vo
   });
 }
 
-export { orgNameForUser };
+export { buildOrgName, passwordForOwner, setOwnerPassword };
