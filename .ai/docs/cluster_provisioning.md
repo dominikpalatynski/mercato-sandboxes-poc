@@ -168,7 +168,16 @@ kubectl -n mercato-sandboxes exec deploy/openmercato -- \
   --manifest /app/src/plans.ts
 ```
 
-## 17. Configure the Onboarding App
+## 17. Generate `OPENMERCATO_API_KEY`
+
+Generate a new API key in the OpenMercato CRM instance via the **API Keys** module,
+then paste it into the onboarding secrets file under the `OPENMERCATO_API_KEY` variable:
+
+```
+infra/manifests/onboarding/onboarding-app-secrets.yaml
+```
+
+## 18. Configure the Onboarding App
 
 Paste the tenant and organization IDs into:
 
@@ -176,7 +185,7 @@ Paste the tenant and organization IDs into:
 infra/manifests/onboarding/onboarding-app-secrets.yaml
 ```
 
-## 18. Apply Onboarding App Secrets
+## 19. Apply Onboarding App Secrets
 
 ```bash
 kubectl apply -f infra/manifests/onboarding/onboarding-app-secrets.yaml
@@ -185,13 +194,13 @@ kubectl apply -f infra/manifests/onboarding/gitea-onboarding-admin-token.yaml
 kubectl apply -f infra/manifests/onboarding/onboarding-coder-template.yaml
 ```
 
-## 19. Deploy the Onboarding App Instance
+## 20. Deploy the Onboarding App Instance
 
 ```bash
 helmfile -f infra/helm/helmfile.yaml -l phase=onboarding apply
 ```
 
-## 20. Enable TLS
+## 21. Enable TLS
 
 Apply the fixed-host HTTP issuer:
 
