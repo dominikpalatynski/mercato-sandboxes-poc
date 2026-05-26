@@ -11,11 +11,11 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - coder.sandbox.palatynskicloud.com
-        - "*.apps.sandbox.palatynskicloud.com"
+        - coder.sandbox.<yourdomain>.com
+        - "*.apps.sandbox.<yourdomain>.com"
       secretName: sandbox-palatynskicloud-wildcard-tls
   rules:
-    - host: coder.sandbox.palatynskicloud.com
+    - host: coder.sandbox.<yourdomain>.com
       http:
         paths:
           - path: /
@@ -25,7 +25,7 @@ spec:
                 name: coder
                 port:
                   number: 80
-    - host: "*.apps.sandbox.palatynskicloud.com"
+    - host: "*.apps.sandbox.<yourdomain>.com"
       http:
         paths:
           - path: /

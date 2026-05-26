@@ -29,7 +29,7 @@ database_host='${database_host}'
 
 configure_git_identity() {
   git config --global user.name "mercato-agent"
-  git config --global user.email "agent@palatynskicloud.com"
+  git config --global user.email "agent@<yourdomain>.com"
   git config --global init.defaultBranch main
   git config --global pull.rebase false
 
@@ -181,7 +181,12 @@ bootstrap_open_mercato_workspace() {
   ensure_env_value "APP_ALLOWED_ORIGINS" "$app_url" ".env"
 
   yarn install
-  yarn mercato agentic:init >/tmp/mercato-agentic-init.log 2>&1 || true
+  yarn mercato agentic:init --tool=claude-code,codex --force \
+    >/tmp/mercato-agentic-init.log 2>&1 || true
+
+  if [ ! -L "$HOME/app/.claude/skills" ] || [ ! -L "$HOME/app/.codex/skills" ]; then
+    echo "[sandbox] WARNING: agentic skill symlinks missing after agentic:init; see /tmp/mercato-agentic-init.log" >> /tmp/mercato-dev.log
+  fi
 }
 
 patch_open_mercato_dev_files() {

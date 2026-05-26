@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes } from 'node:crypto';
 
 const GITEA_API_URL = (process.env.GITEA_API_URL || 'http://gitea-http.gitea.svc.cluster.local:3000').replace(/\/$/, '');
-const GITEA_PUBLIC_URL = (process.env.GITEA_PUBLIC_URL || 'https://gitea.sandbox.palatynskicloud.com').replace(/\/$/, '');
+const GITEA_PUBLIC_URL = (process.env.GITEA_PUBLIC_URL || 'https://gitea.sandbox.<yourdomain>.com').replace(/\/$/, '');
 
 function adminTokenFile(): string {
   return process.env.GITEA_ADMIN_TOKEN_FILE || '/run/secrets/gitea-admin/token';

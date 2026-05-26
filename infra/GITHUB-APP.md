@@ -13,12 +13,12 @@ the user's account, pushes Gitea's history over, and rewires the workspace.
    - **GitHub App name:** `mercato-agent` (must be globally unique; if taken,
      pick `mercato-agent-&lt;suffix&gt;` and use it everywhere below as the
      "slug").
-   - **Homepage URL:** `https://sandbox.palatynskicloud.com`
-   - **Callback URL:** `https://sandbox.palatynskicloud.com/dashboard`
+   - **Homepage URL:** `https://sandbox.<yourdomain>.com`
+   - **Callback URL:** `https://sandbox.<yourdomain>.com/dashboard`
      (used only for the install-confirmation redirect; the real binding
      happens via the webhook)
-   - **Setup URL:** `https://sandbox.palatynskicloud.com/dashboard`
-   - **Webhook URL:** `https://sandbox.palatynskicloud.com/api/github/webhook`
+   - **Setup URL:** `https://sandbox.<yourdomain>.com/dashboard`
+   - **Webhook URL:** `https://sandbox.<yourdomain>.com/api/github/webhook`
    - **Webhook secret:** generate a long random string and stash it; you'll
      paste it into the `github-app-credentials` Secret below.
 3. **Permissions** (repository):
@@ -60,7 +60,7 @@ secret from `github-app-credentials` as envs.
 kubectl rollout restart deployment/onboarding -n mercato-sandboxes
 kubectl logs deploy/onboarding -n mercato-sandboxes --tail=50
 
-# Open `https://sandbox.palatynskicloud.com/api/github/install/start` while
+# Open `https://sandbox.<yourdomain>.com/api/github/install/start` while
 # signed in as a Mercato user; you should be redirected to the GitHub
 # install page. After installing, the webhook is delivered to
 # /api/github/webhook and the installation_id is persisted on the user row.
@@ -70,7 +70,7 @@ Then trigger a migration for a sandbox:
 
 ```bash
 curl -X POST -b "$SESSION_COOKIE" \
-  https://sandbox.palatynskicloud.com/api/sandboxes/<sandbox-id>/migrate-to-github
+  https://sandbox.<yourdomain>.com/api/sandboxes/<sandbox-id>/migrate-to-github
 ```
 
 ## 4. MVP Caveats

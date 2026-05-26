@@ -12,8 +12,8 @@ The intended model for this repo is:
   for the Traefik `LoadBalancer` Service
 - `infra/helm` installs the system components that belong to this repo:
   `cert-manager`, `coder`, `coder-bootstrap`, and `onboarding`
-- `coder.sandbox.palatynskicloud.com` and
-  `*.apps.sandbox.palatynskicloud.com` are routed to the `coder` ClusterIP
+- `coder.sandbox.<yourdomain>.com` and
+  `*.apps.sandbox.<yourdomain>.com` are routed to the `coder` ClusterIP
   Service through Traefik Ingress
 - the built-in k3s `local-path` provisioner backs both platform and workspace
   PVCs, while system-only application pods remain pinned to `node-pool=system`
@@ -86,9 +86,9 @@ This keeps the public edge simple:
 
 4. Point DNS for your sandbox domain at the Traefik LB IP:
 
-   - `sandbox.palatynskicloud.com`
-   - `coder.sandbox.palatynskicloud.com`
-   - `*.apps.sandbox.palatynskicloud.com`
+   - `sandbox.<yourdomain>.com`
+   - `coder.sandbox.<yourdomain>.com`
+   - `*.apps.sandbox.<yourdomain>.com`
 
 5. Create the application namespace and install the foundation releases:
 
@@ -176,7 +176,7 @@ This keeps the public edge simple:
   automatically through `cert-manager` using the `letsencrypt-http`
   `ClusterIssuer`.
 - `manifests/traefik/coder-wildcard-ingress.yaml` now requests the
-  `coder.sandbox.palatynskicloud.com` plus `*.apps.sandbox.palatynskicloud.com`
+  `coder.sandbox.<yourdomain>.com` plus `*.apps.sandbox.<yourdomain>.com`
   certificate automatically through `cert-manager` using the
   `letsencrypt-dns` `ClusterIssuer`.
 - The in-cluster platform PostgreSQL path is now based on two simple

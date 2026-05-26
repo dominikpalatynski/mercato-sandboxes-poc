@@ -83,60 +83,11 @@ spec:
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: DATABASE_URL
-            - name: REDIS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: REDIS_URL
-            - name: QUEUE_REDIS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: QUEUE_REDIS_URL
-            - name: CACHE_REDIS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: CACHE_REDIS_URL
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: JWT_SECRET
-            - name: AUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: AUTH_SECRET
-            - name: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
-            - name: OM_INIT_SUPERADMIN_EMAIL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: OM_INIT_SUPERADMIN_EMAIL
-            - name: OM_INIT_SUPERADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openmercato.appSecretName" . }}
-                  key: OM_INIT_SUPERADMIN_PASSWORD
-            {{- range .Values.app.extraEnv }}
-            - name: {{ .name }}
-              value: {{ .value | quote }}
-            {{- end }}
-            {{- range .Values.app.extraSecretEnv }}
+            {{- range .Values.app.secretEnv }}
             - name: {{ .name }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ default (include "openmercato.appSecretName" $) .secretName }}
+                  name: {{ $.Values.app.secretName }}
                   key: {{ .secretKey }}
             {{- end }}
           volumeMounts:

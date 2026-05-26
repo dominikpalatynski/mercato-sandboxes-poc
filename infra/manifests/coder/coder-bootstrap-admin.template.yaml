@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/part-of: mercato-sandboxes
 type: Opaque
 stringData:
-  email: admin@palatynskicloud.com
+  email: admin@<yourdomain>.com
   username: admin
   full-name: Mercato Admin
   password: REPLACE_ME_CODER_FIRST_USER_PASSWORD

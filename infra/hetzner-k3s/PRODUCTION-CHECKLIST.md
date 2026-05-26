@@ -36,8 +36,8 @@ This checklist assumes:
 ## 2. External Credentials And Provider Access
 
 - [ ] Hetzner Cloud API token is ready
-- [ ] Cloudflare API token with DNS edit access for `palatynskicloud.com` is ready
-- [ ] `palatynskicloud.com` DNS zone is managed in Cloudflare
+- [ ] Cloudflare API token with DNS edit access for `<yourdomain>.com` is ready
+- [ ] `<yourdomain>.com` DNS zone is managed in Cloudflare
 - [ ] SSH keypair for cluster nodes exists:
   - public key path
   - private key path
@@ -236,9 +236,9 @@ Pay special attention to:
 
 Point all of these at the Traefik LB IP:
 
-- [ ] `sandbox.palatynskicloud.com`
-- [ ] `coder.sandbox.palatynskicloud.com`
-- [ ] `*.apps.sandbox.palatynskicloud.com`
+- [ ] `sandbox.<yourdomain>.com`
+- [ ] `coder.sandbox.<yourdomain>.com`
+- [ ] `*.apps.sandbox.<yourdomain>.com`
 
 ## 12. Install Foundation Components
 
@@ -391,14 +391,14 @@ Secret alone is not enough once the data directory already exists.
 
 ## 17. End-To-End Smoke Test
 
-- [ ] `https://sandbox.palatynskicloud.com` loads onboarding
+- [ ] `https://sandbox.<yourdomain>.com` loads onboarding
 - [ ] Login/signup flow works
 - [ ] Sandbox creation succeeds
 - [ ] `coder-bootstrap` produced:
   - `onboarding-coder-admin`
   - `onboarding-coder-template`
 - [ ] `coder` and `onboarding` stay Ready after their DB-backed startup
-- [ ] `https://coder.sandbox.palatynskicloud.com` loads
+- [ ] `https://coder.sandbox.<yourdomain>.com` loads
 - [ ] A workspace lands on `node-pool=sandbox`
 - [ ] Workspace PVCs bind to `hcloud-volumes`
 - [ ] Coder terminal works

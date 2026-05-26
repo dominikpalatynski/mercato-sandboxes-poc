@@ -26,9 +26,9 @@ app:
       sh /app/docker/scripts/init-or-migrate.sh
       exec $MERCATO server start
   env:
-    APP_URL: "https://crm.sandbox.palatynskicloud.com"
-    NEXT_PUBLIC_APP_URL: "https://crm.sandbox.palatynskicloud.com"
-    APP_ALLOWED_ORIGINS: "https://crm.sandbox.palatynskicloud.com"
+    APP_URL: "https://crm.sandbox.<yourdomain>.com"
+    NEXT_PUBLIC_APP_URL: "https://crm.sandbox.<yourdomain>.com"
+    APP_ALLOWED_ORIGINS: "https://crm.sandbox.<yourdomain>.com"
     SELF_SERVICE_ONBOARDING_ENABLED: "true"
     DEMO_MODE: "false"
     UPGRADE_ACTIONS_ENABLED: "false"
@@ -51,17 +51,26 @@ app:
     OM_SANDBOX_BILLING_AUTO_SEED: "true"
     OM_SANDBOX_BILLING_AUTO_SEED_PROVIDER: "mock"
     OM_SUBSCRIPTIONS_PLANS_FILE: "/app/src/plans.ts"
+  secretName: openmercato-app-secrets
   secretEnv:
-    jwtSecret: REPLACE_ME_OPENMERCATO_JWT_SECRET
-    authSecret: REPLACE_ME_OPENMERCATO_AUTH_SECRET
-    tenantDataEncryptionFallbackKey: REPLACE_ME_OPENMERCATO_ENCRYPTION_FALLBACK_KEY
-    initSuperadminEmail: admin@example.com
-    initSuperadminPassword: REPLACE_ME_OPENMERCATO_ADMIN_PASSWORD
-    extra:
-      SANDBOX_BILLING_WEBHOOK_SECRET: REPLACE_ME_OPENMERCATO_BILLING_WEBHOOK_SECRET
-      SANDBOX_BILLING_CONTEXT_SECRET: REPLACE_ME_OPENMERCATO_BILLING_CONTEXT_SECRET
-      MOCK_GATEWAY_WEBHOOK_SECRET: REPLACE_ME_OPENMERCATO_MOCK_GATEWAY_WEBHOOK_SECRET
-  extraSecretEnv:
+    - name: DATABASE_URL
+      secretKey: DATABASE_URL
+    - name: REDIS_URL
+      secretKey: REDIS_URL
+    - name: QUEUE_REDIS_URL
+      secretKey: QUEUE_REDIS_URL
+    - name: CACHE_REDIS_URL
+      secretKey: CACHE_REDIS_URL
+    - name: JWT_SECRET
+      secretKey: JWT_SECRET
+    - name: AUTH_SECRET
+      secretKey: AUTH_SECRET
+    - name: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+      secretKey: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+    - name: OM_INIT_SUPERADMIN_EMAIL
+      secretKey: OM_INIT_SUPERADMIN_EMAIL
+    - name: OM_INIT_SUPERADMIN_PASSWORD
+      secretKey: OM_INIT_SUPERADMIN_PASSWORD
     - name: SANDBOX_BILLING_WEBHOOK_SECRET
       secretKey: SANDBOX_BILLING_WEBHOOK_SECRET
     - name: ONBOARDING_WEBHOOK_SECRET
@@ -95,11 +104,11 @@ ingress:
     kubernetes.io/ingress.class: traefik
     cert-manager.io/cluster-issuer: letsencrypt-http
   hosts:
-    - host: crm.sandbox.palatynskicloud.com
+    - host: crm.sandbox.<yourdomain>.com
       paths:
         - path: /
           pathType: Prefix
   tls:
     - hosts:
-        - crm.sandbox.palatynskicloud.com
+        - crm.sandbox.<yourdomain>.com
       secretName: crm-sandbox-palatynskicloud-tls

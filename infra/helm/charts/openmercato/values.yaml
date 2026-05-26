@@ -39,15 +39,26 @@ app:
     OM_DISABLE_VECTOR_SEARCH_AUTOINDEXING: "true"
     OM_AI_PROVIDER: openai
     OM_AI_MODEL: gpt-5-mini
+  secretName: openmercato-app-secrets
   secretEnv:
-    jwtSecret: change-me-jwt-secret
-    authSecret: change-me-auth-secret
-    tenantDataEncryptionFallbackKey: change-me-tenant-encryption-fallback-key
-    initSuperadminEmail: superadmin@example.com
-    initSuperadminPassword: change-me-superadmin-password
-    extra: {}
-  extraEnv: []
-  extraSecretEnv: []
+    - name: DATABASE_URL
+      secretKey: DATABASE_URL
+    - name: REDIS_URL
+      secretKey: REDIS_URL
+    - name: QUEUE_REDIS_URL
+      secretKey: QUEUE_REDIS_URL
+    - name: CACHE_REDIS_URL
+      secretKey: CACHE_REDIS_URL
+    - name: JWT_SECRET
+      secretKey: JWT_SECRET
+    - name: AUTH_SECRET
+      secretKey: AUTH_SECRET
+    - name: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+      secretKey: TENANT_DATA_ENCRYPTION_FALLBACK_KEY
+    - name: OM_INIT_SUPERADMIN_EMAIL
+      secretKey: OM_INIT_SUPERADMIN_EMAIL
+    - name: OM_INIT_SUPERADMIN_PASSWORD
+      secretKey: OM_INIT_SUPERADMIN_PASSWORD
   podAnnotations: {}
   podLabels: {}
   podSecurityContext:

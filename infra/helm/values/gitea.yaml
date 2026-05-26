@@ -47,13 +47,13 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-dns
   hosts:
-    - host: gitea.sandbox.palatynskicloud.com
+    - host: gitea.sandbox.<yourdomain>.com
       paths:
         - path: /
           pathType: Prefix
   tls:
     - hosts:
-        - gitea.sandbox.palatynskicloud.com
+        - gitea.sandbox.<yourdomain>.com
       secretName: gitea-sandbox-palatynskicloud-tls
 
 nodeSelector:
@@ -82,9 +82,9 @@ gitea:
 
   config:
     server:
-      DOMAIN: gitea.sandbox.palatynskicloud.com
-      ROOT_URL: https://gitea.sandbox.palatynskicloud.com/
-      SSH_DOMAIN: gitea.sandbox.palatynskicloud.com
+      DOMAIN: gitea.sandbox.<yourdomain>.com
+      ROOT_URL: https://gitea.sandbox.<yourdomain>.com/
+      SSH_DOMAIN: gitea.sandbox.<yourdomain>.com
       DISABLE_SSH: true
       START_SSH_SERVER: false
     database:

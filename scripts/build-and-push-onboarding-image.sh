@@ -30,7 +30,7 @@ fi
 
 GHCR_OWNER="${GHCR_OWNER:-dominikpalatynski}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
-IMAGE_TAG="${IMAGE_TAG:-git-$(git rev-parse --short HEAD)}v8"
+IMAGE_TAG="${IMAGE_TAG:-git-$(git rev-parse --short HEAD)}v11"
 ONBOARDING_IMAGE_REPOSITORY="${ONBOARDING_IMAGE_REPOSITORY:-ghcr.io/${GHCR_OWNER}/mercato-onboarding}"
 IMAGE_REF="${ONBOARDING_IMAGE_REPOSITORY}:${IMAGE_TAG}"
 

@@ -32,10 +32,6 @@ app.kubernetes.io/name: {{ include "openmercato.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{- define "openmercato.appSecretName" -}}
-{{- printf "%s-app" (include "openmercato.fullname" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
 {{- define "openmercato.storageName" -}}
 {{- printf "%s-storage" (include "openmercato.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
@@ -60,10 +56,3 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-rw" (include "openmercato.redisName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "openmercato.databaseUrl" -}}
-{{- printf "postgres://%s:%s@%s.%s.svc.cluster.local:%d/%s?sslmode=disable" .Values.postgres.auth.username .Values.postgres.auth.password (include "openmercato.postgresReadWriteName" .) .Release.Namespace (int .Values.postgres.service.port) .Values.postgres.auth.database -}}
-{{- end -}}
-
-{{- define "openmercato.redisUrl" -}}
-{{- printf "redis://%s.%s.svc.cluster.local:%d" (include "openmercato.redisReadWriteName" .) .Release.Namespace (int .Values.redis.service.port) -}}
-{{- end -}}

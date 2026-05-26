@@ -9,9 +9,9 @@ coder:
           name: coder-db-url
           key: url
     - name: CODER_ACCESS_URL
-      value: "https://coder.sandbox.palatynskicloud.com"
+      value: "https://coder.sandbox.<yourdomain>.com"
     - name: CODER_WILDCARD_ACCESS_URL
-      value: "*.apps.sandbox.palatynskicloud.com"
+      value: "*.apps.sandbox.<yourdomain>.com"
     - name: CODER_TELEMETRY_ENABLE
       value: "false"
     - name: CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE

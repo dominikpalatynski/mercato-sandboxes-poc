@@ -5,7 +5,7 @@ image:
 
 coder:
   accessUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
-  publicUrl: "https://coder.sandbox.palatynskicloud.com"
+  publicUrl: "https://coder.sandbox.<yourdomain>.com"
   internalUrl: "http://coder.mercato-sandboxes.svc.cluster.local"
   organization: ""
   cliVersion: "2.33.2"
@@ -36,8 +36,8 @@ template:
   workspaceNodeOptions: "--max-old-space-size=6144"
   proxyScheme: "https"
   proxyPortSuffix: ""
-  sandboxDomain: "sandbox.palatynskicloud.com"
-  wildcardAppsDomain: "apps.sandbox.palatynskicloud.com"
+  sandboxDomain: "sandbox.<yourdomain>.com"
+  wildcardAppsDomain: "apps.sandbox.<yourdomain>.com"
 
 serviceAccount:
   create: true

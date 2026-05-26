@@ -282,7 +282,7 @@ Examples for Traefik HTTP-01 live in `infra/manifests/cert-manager/`:
 Start with staging to validate HTTP-01 flow without hitting Let's Encrypt rate
 limits, then switch to production.
 
-Wildcard certificates for `*.apps.sandbox.palatynskicloud.com` require
+Wildcard certificates for `*.apps.sandbox.<yourdomain>.com` require
 `DNS-01`; the repo now ships Route53-oriented templates as the default path and
 keeps Cloudflare templates as an optional alternative. For either provider,
 keep the `ClusterIssuer` name as `letsencrypt-dns` and change only the solver

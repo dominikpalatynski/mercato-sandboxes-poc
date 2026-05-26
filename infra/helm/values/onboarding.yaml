@@ -2,7 +2,7 @@
 # bash scripts/build-and-push-onboarding-image.sh
 image:
   repository: ghcr.io/dominikpalatynski/mercato-onboarding
-  tag: git-c50080ev8
+  tag: git-fba59d7v11
 imagePullSecrets:
   - name: ghcr-pull
 
@@ -10,21 +10,21 @@ env:
   - name: COOKIE_SECURE
     value: "true"
   - name: COOKIE_DOMAIN
-    value: ".sandbox.palatynskicloud.com"
+    value: ".sandbox.<yourdomain>.com"
   - name: BILLING_BACKEND
     value: "openmercato"
   - name: ONBOARDING_PUBLIC_URL
-    value: "https://sandbox.palatynskicloud.com"
+    value: "https://sandbox.<yourdomain>.com"
   - name: CODER_URL
     value: "http://coder.mercato-sandboxes.svc.cluster.local"
   - name: CODER_PUBLIC_URL
-    value: "https://coder.sandbox.palatynskicloud.com"
+    value: "https://coder.sandbox.<yourdomain>.com"
   - name: WILDCARD_APPS_DOMAIN
-    value: "apps.sandbox.palatynskicloud.com"
+    value: "apps.sandbox.<yourdomain>.com"
   - name: GITEA_API_URL
     value: "http://gitea-http.gitea.svc.cluster.local:3000"
   - name: GITEA_PUBLIC_URL
-    value: "https://gitea.sandbox.palatynskicloud.com"
+    value: "https://gitea.sandbox.<yourdomain>.com"
   - name: WORKSPACE_NAMESPACE
     value: "mercato-sandboxes"
   # Trust the in-cluster CA so global fetch can talk to the Kubernetes API
@@ -32,7 +32,7 @@ env:
   - name: NODE_EXTRA_CA_CERTS
     value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
   - name: OPENMERCATO_API_BASE_URL
-    value: "https://crm.sandbox.palatynskicloud.com"
+    value: "https://crm.sandbox.<yourdomain>.com"
   - name: OPENMERCATO_BILLING_WEBHOOK_TOLERANCE_SECONDS
     value: "300"
   - name: PAYBYLINK_SIGNATURE_ALGORITHM
@@ -141,11 +141,11 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-http
   hosts:
-    - host: sandbox.palatynskicloud.com
+    - host: sandbox.<yourdomain>.com
       paths:
         - path: /
           pathType: Prefix
   tls:
     - hosts:
-        - sandbox.palatynskicloud.com
+        - sandbox.<yourdomain>.com
       secretName: sandbox-palatynskicloud-tls

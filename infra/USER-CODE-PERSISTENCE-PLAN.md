@@ -58,7 +58,7 @@ No PVC migration needed — cluster is greenfield.
   - `gitea.config.database.*` points at a new `postgres-gitea` cluster
   - `gitea.admin.*` sourced from a `gitea-admin-credentials` Secret
   - `service.ssh.type: ClusterIP` (push over HTTPS only in MVP)
-  - Ingress: `gitea.sandbox.palatynskicloud.com`, annotated with
+  - Ingress: `gitea.sandbox.<yourdomain>.com`, annotated with
     `cluster-issuer: letsencrypt-dns`
   - `service.DISABLE_REGISTRATION: true`
   - `repository.DEFAULT_PRIVATE: private`
@@ -89,7 +89,7 @@ can use it normally.
 
 - update the workspace image (`mercato-workspace`) startup script:
   - `git config --global user.name "mercato-agent"`
-  - `git config --global user.email "agent@palatynskicloud.com"`
+  - `git config --global user.email "agent@<yourdomain>.com"`
   - credential helper backed by `$MERCATO_REPO_TOKEN`
   - on first start: `git clone $MERCATO_REPO_URL /home/coder/project`
     (or `git init` + initial commit if the repo is empty)
