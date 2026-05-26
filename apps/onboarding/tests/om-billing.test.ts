@@ -11,6 +11,8 @@ import {
   getOmBillingSummaryForUser,
   startSubscriptionCheckout,
   startSubscriptionPortal,
+  syncActiveOmBillingUsage,
+  syncOmBillingUsageForUser,
   verifyOmWebhookSignature,
   type OmBillingDependencies,
   type OmBillingRepository,
@@ -719,6 +721,153 @@ test('processOmAccessChangedWebhook rejects payloads with bad signature', async 
     },
   );
   delete process.env.OM_BILLING_WEBHOOK_SECRET;
+});
+
+function existingActiveAccount(overrides: Partial<OmLlmAccountRow> = {}): OmLlmAccountRow {
+  return {
+    id: 'llm-existing',
+    userId: 'user-1',
+    provider: 'openrouter',
+    openrouterKeyHash: 'hash-existing',
+    openrouterKeyLabel: 'open-mercato-user-1',
+    status: 'active',
+    coderSecretSyncState: 'synced',
+    limitUsd: 50,
+    limitReset: null,
+    lastSyncedAt: new Date('2026-05-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeOpenRouterKeyRecord(
+  hash: string,
+  overrides: Partial<OpenRouterApiKeyRecord> = {},
+): OpenRouterApiKeyRecord {
+  return {
+    hash,
+    label: 'open-mercato-user-1',
+    name: 'open-mercato-user-1',
+    limit: 50,
+    limit_remaining: 30,
+    limit_reset: null,
+    usage: 20,
+    usage_monthly: 15,
+    disabled: false,
+    ...overrides,
+  } as OpenRouterApiKeyRecord;
+}
+
+test('syncOmBillingUsageForUser writes a snapshot and refreshes lastSyncedAt on the happy path', async () => {
+  const state = makeState(baseUser(), existingActiveAccount());
+  state.users[0]!.coderUserId = 'coder-user-1';
+  const getKeyCalls: string[] = [];
+  const deps = buildDeps(state, {
+    getSubscriptionAccess: (async () => makeSnapshot('granted')) as unknown as OmBillingDependencies['getSubscriptionAccess'],
+    getOpenRouterKey: (async (hash: string) => {
+      getKeyCalls.push(hash);
+      return makeOpenRouterKeyRecord(hash, { usage_monthly: 17.5, limit_remaining: 32.5 });
+    }) as unknown as OmBillingDependencies['getOpenRouterKey'],
+  });
+
+  const before = Date.now();
+  const outcome = await syncOmBillingUsageForUser('user-1', deps, { minIntervalMs: 0 });
+  assert.equal(outcome, 'synced');
+  assert.deepEqual(getKeyCalls, ['hash-existing']);
+  assert.equal(state.usageSnapshots.length, 1);
+  assert.equal(state.usageSnapshots[0]!.llmAccountId, 'llm-existing');
+  const account = state.llmAccounts[0]!;
+  assert.ok(account.lastSyncedAt instanceof Date);
+  assert.ok(account.lastSyncedAt!.getTime() >= before);
+});
+
+test('syncOmBillingUsageForUser skips when lastSyncedAt is within minIntervalMs window', async () => {
+  const state = makeState(baseUser(), existingActiveAccount({ lastSyncedAt: new Date() }));
+  state.users[0]!.coderUserId = 'coder-user-1';
+  let getKeyCalls = 0;
+  let accessCalls = 0;
+  const deps = buildDeps(state, {
+    getSubscriptionAccess: (async () => {
+      accessCalls += 1;
+      return makeSnapshot('granted');
+    }) as unknown as OmBillingDependencies['getSubscriptionAccess'],
+    getOpenRouterKey: (async (hash: string) => {
+      getKeyCalls += 1;
+      return makeOpenRouterKeyRecord(hash);
+    }) as unknown as OmBillingDependencies['getOpenRouterKey'],
+  });
+
+  const outcome = await syncOmBillingUsageForUser('user-1', deps);
+  assert.equal(outcome, 'skipped-throttled');
+  assert.equal(getKeyCalls, 0);
+  assert.equal(accessCalls, 0);
+  assert.equal(state.usageSnapshots.length, 0);
+});
+
+test('syncOmBillingUsageForUser returns skipped-inactive when no llm account is provisioned', async () => {
+  const state = makeState(baseUser());
+  const deps = buildDeps(state, {
+    getSubscriptionAccess: (async () => makeSnapshot('pending', null)) as unknown as OmBillingDependencies['getSubscriptionAccess'],
+    getOpenRouterKey: (async () => {
+      throw new Error('should not be called when account is missing');
+    }) as unknown as OmBillingDependencies['getOpenRouterKey'],
+  });
+
+  const outcome = await syncOmBillingUsageForUser('user-1', deps, { minIntervalMs: 0 });
+  assert.equal(outcome, 'skipped-inactive');
+  assert.equal(state.llmAccounts.length, 0);
+  assert.equal(state.usageSnapshots.length, 0);
+});
+
+test('syncOmBillingUsageForUser returns sync-failed when the OpenRouter call throws', async () => {
+  const state = makeState(baseUser(), existingActiveAccount());
+  state.users[0]!.coderUserId = 'coder-user-1';
+  const deps = buildDeps(state, {
+    getSubscriptionAccess: (async () => makeSnapshot('granted')) as unknown as OmBillingDependencies['getSubscriptionAccess'],
+    getOpenRouterKey: (async () => {
+      throw new Error('openrouter down');
+    }) as unknown as OmBillingDependencies['getOpenRouterKey'],
+  });
+
+  const outcome = await syncOmBillingUsageForUser('user-1', deps, { minIntervalMs: 0 });
+  assert.equal(outcome, 'sync-failed');
+  assert.equal(state.usageSnapshots.length, 0);
+});
+
+test('syncActiveOmBillingUsage iterates all active accounts and bypasses the throttle', async () => {
+  const state = makeState(baseUser(), existingActiveAccount({ lastSyncedAt: new Date() }));
+  state.users[0]!.coderUserId = 'coder-user-1';
+  state.users.push({
+    id: 'user-2',
+    email: 'two@example.com',
+    openMercatoCustomerPersonId: '99999999-9999-4999-8999-999999999998',
+    coderUserId: 'coder-user-2',
+    coderUsername: 'two',
+    coderTempPassword: null,
+  });
+  state.llmAccounts.push(
+    existingActiveAccount({
+      id: 'llm-existing-2',
+      userId: 'user-2',
+      openrouterKeyHash: 'hash-existing-2',
+      lastSyncedAt: new Date(),
+    }),
+  );
+  const getKeyCalls: string[] = [];
+  const deps = buildDeps(state, {
+    getSubscriptionAccess: (async () => makeSnapshot('granted')) as unknown as OmBillingDependencies['getSubscriptionAccess'],
+    getOpenRouterKey: (async (hash: string) => {
+      getKeyCalls.push(hash);
+      return makeOpenRouterKeyRecord(hash);
+    }) as unknown as OmBillingDependencies['getOpenRouterKey'],
+  });
+
+  const result = await syncActiveOmBillingUsage(deps);
+  assert.equal(result.total, 2);
+  assert.equal(result.reconciled, 2);
+  assert.equal(result.snapshot_written, 2);
+  assert.equal(result.failed, 0);
+  assert.deepEqual(getKeyCalls.sort(), ['hash-existing', 'hash-existing-2']);
+  assert.equal(state.usageSnapshots.length, 2);
 });
 
 test('processOmAccessChangedWebhook ignores events for other product codes', async () => {

@@ -1075,6 +1075,65 @@ export interface UsageSyncResult {
   failed: number;
 }
 
+export type SyncOmBillingUsageForUserOutcome =
+  | 'synced'
+  | 'skipped-throttled'
+  | 'skipped-inactive'
+  | 'reconcile-failed'
+  | 'sync-failed';
+
+export interface SyncOmBillingUsageForUserOptions {
+  minIntervalMs?: number;
+}
+
+export const DEFAULT_USAGE_SYNC_MIN_INTERVAL_MS = 30_000;
+
+export async function syncOmBillingUsageForUser(
+  userId: string,
+  deps: OmBillingDependencies = {},
+  options: SyncOmBillingUsageForUserOptions = {},
+): Promise<SyncOmBillingUsageForUserOutcome> {
+  const resolved = resolveDeps(deps);
+  const minIntervalMs = options.minIntervalMs ?? DEFAULT_USAGE_SYNC_MIN_INTERVAL_MS;
+
+  if (minIntervalMs > 0) {
+    const existing = await resolved.repository.getLlmAccount(userId);
+    if (existing?.lastSyncedAt) {
+      const elapsed = Date.now() - existing.lastSyncedAt.getTime();
+      if (elapsed < minIntervalMs) return 'skipped-throttled';
+    }
+  }
+
+  try {
+    await reconcileLlmAccessForUser(userId, deps);
+  } catch {
+    return 'reconcile-failed';
+  }
+
+  try {
+    const latestAccount = await resolved.repository.getLlmAccount(userId);
+    if (!latestAccount || latestAccount.status !== 'active') {
+      return 'skipped-inactive';
+    }
+    const key = await resolved.getOpenRouterKey(latestAccount.openrouterKeyHash);
+    await resolved.repository.syncLlmAccountFromProvider(latestAccount.id, {
+      keyLabel: key.label,
+      limitUsd: toMoney(key.limit ?? 0),
+      limitReset: key.limit_reset,
+      status: key.disabled ? 'suspended' : 'active',
+    });
+    await resolved.repository.insertUsageSnapshot({
+      llmAccountId: latestAccount.id,
+      usageTotalUsd: toMoney(key.usage),
+      usageMonthlyUsd: toMoney(key.usage_monthly),
+      limitRemainingUsd: toMoney(key.limit_remaining ?? 0),
+    });
+    return 'synced';
+  } catch {
+    return 'sync-failed';
+  }
+}
+
 export async function syncActiveOmBillingUsage(
   deps: OmBillingDependencies = {},
 ): Promise<UsageSyncResult> {
@@ -1086,34 +1145,24 @@ export async function syncActiveOmBillingUsage(
   let failed = 0;
 
   for (const account of accounts) {
-    try {
-      await reconcileLlmAccessForUser(account.userId, deps);
-      reconciled += 1;
-    } catch {
-      failed += 1;
-      continue;
-    }
-    try {
-      const latestAccount = await resolved.repository.getLlmAccount(account.userId);
-      if (!latestAccount || latestAccount.status !== 'active') {
-        continue;
-      }
-      const key = await resolved.getOpenRouterKey(latestAccount.openrouterKeyHash);
-      await resolved.repository.syncLlmAccountFromProvider(latestAccount.id, {
-        keyLabel: key.label,
-        limitUsd: toMoney(key.limit ?? 0),
-        limitReset: key.limit_reset,
-        status: key.disabled ? 'suspended' : 'active',
-      });
-      await resolved.repository.insertUsageSnapshot({
-        llmAccountId: latestAccount.id,
-        usageTotalUsd: toMoney(key.usage),
-        usageMonthlyUsd: toMoney(key.usage_monthly),
-        limitRemainingUsd: toMoney(key.limit_remaining ?? 0),
-      });
-      snapshotWritten += 1;
-    } catch {
-      failed += 1;
+    const outcome = await syncOmBillingUsageForUser(account.userId, deps, { minIntervalMs: 0 });
+    switch (outcome) {
+      case 'synced':
+        reconciled += 1;
+        snapshotWritten += 1;
+        break;
+      case 'skipped-inactive':
+        reconciled += 1;
+        break;
+      case 'sync-failed':
+        reconciled += 1;
+        failed += 1;
+        break;
+      case 'reconcile-failed':
+        failed += 1;
+        break;
+      case 'skipped-throttled':
+        break;
     }
   }
 

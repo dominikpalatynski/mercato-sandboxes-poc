@@ -8,6 +8,7 @@ import {
 import {
   getOmBillingSummaryForUser,
   reconcileLlmAccessForUser,
+  syncOmBillingUsageForUser,
 } from '@/lib/om-billing';
 import { BillingUsageCard } from '@/components/billing-usage-card';
 
@@ -25,6 +26,8 @@ export default async function BillingPage({
   // Best-effort reconcile so the page reflects fresh OM access on every load.
   // Webhooks are the primary trigger; this is a fallback.
   await reconcileLlmAccessForUser(session.sub).catch(() => {});
+  // Lazy pull of OpenRouter usage; throttled by lastSyncedAt so refreshes don't hammer the provider.
+  await syncOmBillingUsageForUser(session.sub).catch(() => {});
   const summary = await getOmBillingSummaryForUser(session.sub);
 
   const params = await searchParams;
