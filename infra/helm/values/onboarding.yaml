@@ -2,7 +2,7 @@
 # bash scripts/build-and-push-onboarding-image.sh
 image:
   repository: ghcr.io/dominikpalatynski/mercato-onboarding
-  tag: git-fba59d7v11
+  tag: git-51d2618v12
 imagePullSecrets:
   - name: ghcr-pull
 
@@ -46,15 +46,7 @@ secretEnv:
   - name: POSTGRES_URL
     secretName: onboarding-app-secrets
     secretKey: POSTGRES_URL
-  - name: GITHUB_APP_ID
-    secretName: github-app-credentials
-    secretKey: app-id
-  - name: GITHUB_APP_SLUG
-    secretName: github-app-credentials
-    secretKey: app-slug
-  - name: GITHUB_APP_WEBHOOK_SECRET
-    secretName: github-app-credentials
-    secretKey: webhook-secret
+    # secretKey: webhook-secret
   - name: JWT_SECRET
     secretName: onboarding-app-secrets
     secretKey: JWT_SECRET
@@ -105,12 +97,6 @@ fileSecrets:
     secretKey: token
     mountPath: /run/secrets/gitea-admin
     fileName: token
-  - name: github-app-private-key
-    envName: GITHUB_APP_PRIVATE_KEY_FILE
-    secretName: github-app-private-key
-    secretKey: private-key.pem
-    mountPath: /run/secrets/github-app
-    fileName: private-key.pem
 
 databaseMigration:
   enabled: true
@@ -148,4 +134,4 @@ ingress:
   tls:
     - hosts:
         - sandbox.<yourdomain>.com
-      secretName: sandbox-palatynskicloud-tls
+      secretName: sandbox-<yourdomain>-tls

@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ include "coder-bootstrap.serviceAccountName" . }}
       restartPolicy: Never
       containers:
-        - name: coder-bootstrap
+        - name: services-bootstrap
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
@@ -69,6 +69,24 @@ spec:
               value: {{ .Values.generatedSecrets.adminTokenName | quote }}
             - name: ONBOARDING_TEMPLATE_SECRET_NAME
               value: {{ .Values.generatedSecrets.templateIdName | quote }}
+            - name: GITEA_URL
+              value: {{ .Values.gitea.url | quote }}
+            - name: GITEA_ADMIN_SECRET_NAME
+              value: {{ .Values.gitea.adminSecret.name | quote }}
+            - name: GITEA_ADMIN_SECRET_NAMESPACE
+              value: {{ .Values.gitea.adminSecret.namespace | quote }}
+            - name: GITEA_ADMIN_USERNAME_KEY
+              value: {{ .Values.gitea.adminSecret.usernameKey | quote }}
+            - name: GITEA_ADMIN_PASSWORD_KEY
+              value: {{ .Values.gitea.adminSecret.passwordKey | quote }}
+            - name: GITEA_ONBOARDING_TOKEN_SECRET_NAME
+              value: {{ .Values.gitea.onboardingTokenSecret.name | quote }}
+            - name: GITEA_ONBOARDING_TOKEN_KEY
+              value: {{ .Values.gitea.onboardingTokenSecret.key | quote }}
+            - name: GITEA_TOKEN_NAME
+              value: {{ .Values.gitea.tokenName | quote }}
+            - name: GITEA_TOKEN_SCOPES
+              value: {{ join "," .Values.gitea.tokenScopes | quote }}
             - name: SANDBOX_DOMAIN
               value: {{ .Values.template.sandboxDomain | quote }}
             - name: WILDCARD_APPS_DOMAIN

@@ -43,13 +43,14 @@ releases:
     values:
       - values/coder.yaml
 
-  - name: coder-bootstrap
+  - name: services-bootstrap
     labels:
-      phase: coder-bootstrap
+      phase: services-bootstrap
     namespace: mercato-sandboxes
     createNamespace: true
     needs:
       - mercato-sandboxes/coder
+      - gitea/gitea
     chart: ./charts/coder-bootstrap
     values:
       - values/coder-bootstrap.yaml
@@ -60,7 +61,7 @@ releases:
     namespace: mercato-sandboxes
     createNamespace: true
     needs:
-      - mercato-sandboxes/coder-bootstrap
+      - mercato-sandboxes/services-bootstrap
       - gitea/gitea
     chart: ./charts/onboarding
     values:

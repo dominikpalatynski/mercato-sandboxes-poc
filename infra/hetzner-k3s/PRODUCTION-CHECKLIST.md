@@ -13,7 +13,7 @@ This checklist assumes:
 - `hetzner-k3s` is the cluster bootstrap path
 - k3s builtin `traefik` addon is used
 - one public Hetzner Load Balancer sits in front of Traefik
-- `infra/helm` installs `cert-manager`, `coder`, `coder-bootstrap`, and
+- `infra/helm` installs `cert-manager`, `coder`, `services-bootstrap`, and
   `onboarding`
 - platform PostgreSQL is applied from `infra/manifests/postgres/` as two simple
   single-replica `StatefulSet`s with matching `-rw` Services
@@ -327,17 +327,17 @@ Secret alone is not enough once the data directory already exists.
   helmfile -f infra/helm/helmfile.yaml -l phase=coder apply
   ```
 
-- [ ] Run the in-cluster Coder bootstrap:
+- [ ] Run the in-cluster services bootstrap:
 
   ```bash
-  helmfile -f infra/helm/helmfile.yaml -l phase=coder-bootstrap apply
+  helmfile -f infra/helm/helmfile.yaml -l phase=services-bootstrap apply
   ```
 
 - [ ] Verify the bootstrap Job succeeded:
 
   ```bash
   kubectl get jobs -n mercato-sandboxes
-  kubectl logs job/coder-bootstrap -n mercato-sandboxes
+  kubectl logs job/services-bootstrap -n mercato-sandboxes
   ```
 
 - [ ] Install onboarding:
@@ -394,9 +394,10 @@ Secret alone is not enough once the data directory already exists.
 - [ ] `https://sandbox.<yourdomain>.com` loads onboarding
 - [ ] Login/signup flow works
 - [ ] Sandbox creation succeeds
-- [ ] `coder-bootstrap` produced:
+- [ ] `services-bootstrap` produced:
   - `onboarding-coder-admin`
   - `onboarding-coder-template`
+  - `gitea-onboarding-admin-token`
 - [ ] `coder` and `onboarding` stay Ready after their DB-backed startup
 - [ ] `https://coder.sandbox.<yourdomain>.com` loads
 - [ ] A workspace lands on `node-pool=sandbox`

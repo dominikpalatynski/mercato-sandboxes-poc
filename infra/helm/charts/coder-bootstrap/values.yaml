@@ -24,6 +24,20 @@ generatedSecrets:
   adminTokenName: "onboarding-coder-admin"
   templateIdName: "onboarding-coder-template"
 
+gitea:
+  url: "http://gitea-http.gitea.svc.cluster.local:3000"
+  adminSecret:
+    name: "gitea-admin-credentials"
+    namespace: "gitea"
+    usernameKey: "username"
+    passwordKey: "password"
+  onboardingTokenSecret:
+    name: "gitea-onboarding-admin-token"
+    key: "token"
+  tokenName: "onboarding-admin"
+  tokenScopes:
+    - "all"
+
 template:
   workspaceNamespace: "mercato-sandboxes"
   workspaceImage: "replace-me-workspace-image"

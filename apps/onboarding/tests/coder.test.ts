@@ -67,6 +67,18 @@ test('ensureCoderUser reuses an existing Coder account after a create conflict',
       });
     }
 
+    if (url === 'http://coder.test/api/v2/users/coder-user-1/status/activate' && method === 'PUT') {
+      return new Response(JSON.stringify({
+        id: 'coder-user-1',
+        username: 'user',
+        email: 'user@example.com',
+        status: 'active',
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     throw new Error(`Unexpected fetch ${method} ${url}`);
   };
 
@@ -85,6 +97,7 @@ test('ensureCoderUser reuses an existing Coder account after a create conflict',
     { method: 'GET', url: 'http://coder.test/api/v2/users/me' },
     { method: 'POST', url: 'http://coder.test/api/v2/users' },
     { method: 'GET', url: 'http://coder.test/api/v2/users/user' },
+    { method: 'PUT', url: 'http://coder.test/api/v2/users/coder-user-1/status/activate' },
   ]);
 });
 

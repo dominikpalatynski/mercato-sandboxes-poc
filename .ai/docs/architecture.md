@@ -236,7 +236,7 @@ Open Mercato is the source of truth for subscriptions. Onboarding never talks to
 - **Platform**: k3s on Hetzner Cloud, provisioned via OpenTofu (`infra/hetzner-k3s/`).
 - **TLS**: Let's Encrypt + Cloudflare DNS-01 for wildcard certs.
 - **Storage**: Hetzner CSI volumes for every stateful component.
-- **Deployments**: Helm releases from `infra/helm/values/` (onboarding, coder, coder-bootstrap, gitea, openmercato).
+- **Deployments**: Helm releases from `infra/helm/values/` (onboarding, coder, services-bootstrap, gitea, openmercato).
 
 ---
 

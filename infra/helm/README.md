@@ -6,7 +6,7 @@ path:
 - `cert-manager`
 - `gitea`
 - `coder`
-- `coder-bootstrap`
+- `services-bootstrap`
 - `onboarding`
 - `openmercato`
 
@@ -175,27 +175,22 @@ initialises with the value baked into `postgres-gitea-app` on first boot.
 helmfile -f infra/helm/helmfile.yaml -l phase=coder apply
 ```
 
-9. Run the in-cluster Coder bootstrap Job. This Job:
+9. Run the in-cluster services bootstrap Job. This Job:
 
 - creates the first admin user if the deployment is still fresh
 - mints or reuses the onboarding admin token
+- mints or reuses the Gitea admin PAT mounted by onboarding
 - pushes the Kubernetes workspace template with the configured variables
-- writes `onboarding-coder-admin` and `onboarding-coder-template` as cluster
-  Secrets
+- writes `onboarding-coder-admin`, `onboarding-coder-template`, and
+  `gitea-onboarding-admin-token` as cluster Secrets
 
 ```bash
-helmfile -f infra/helm/helmfile.yaml -l phase=coder-bootstrap apply
+helmfile -f infra/helm/helmfile.yaml -l phase=services-bootstrap apply
 ```
 
-10. Install onboarding after the bootstrap Job succeeds. First mint and apply
-the Gitea admin PAT used by onboarding to call Gitea's admin API (create
-users, orgs, repos, deploy tokens). Login to the Gitea UI as
-`mercato-admin` (the user from `gitea-admin-credentials`) and create a
-token with scopes `admin:org`, `repo`, `user`, `write:repository`.
+10. Install onboarding after the bootstrap Job succeeds.
 
 ```bash
-$EDITOR infra/manifests/onboarding/gitea-onboarding-admin-token.template.yaml
-kubectl apply -f infra/manifests/onboarding/gitea-onboarding-admin-token.template.yaml
 helmfile -f infra/helm/helmfile.yaml -l phase=onboarding apply
 ```
 
@@ -261,7 +256,7 @@ kubectl get storageclass hcloud-volumes
 kubectl get storageclass local-path
 kubectl get pods -n mercato-sandboxes -o wide
 kubectl get jobs -n mercato-sandboxes
-kubectl logs job/coder-bootstrap -n mercato-sandboxes
+kubectl logs job/services-bootstrap -n mercato-sandboxes
 kubectl get svc,ingress -n mercato-sandboxes
 kubectl get statefulset,pvc -n mercato-sandboxes | grep openmercato
 ```

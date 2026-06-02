@@ -1,6 +1,6 @@
 apiVersion: v2
-name: coder-bootstrap
-description: Bootstrap Coder admin access and publish the Kubernetes template.
+name: services-bootstrap
+description: Bootstrap service credentials and publish the Coder Kubernetes template.
 type: application
 version: 0.1.0
 appVersion: "2.33.2"

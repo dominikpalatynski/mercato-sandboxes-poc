@@ -11,7 +11,7 @@ The intended model for this repo is:
 - Hetzner Cloud Controller Manager provisions one public Hetzner Load Balancer
   for the Traefik `LoadBalancer` Service
 - `infra/helm` installs the system components that belong to this repo:
-  `cert-manager`, `coder`, `coder-bootstrap`, and `onboarding`
+  `cert-manager`, `coder`, `services-bootstrap`, and `onboarding`
 - `coder.sandbox.<yourdomain>.com` and
   `*.apps.sandbox.<yourdomain>.com` are routed to the `coder` ClusterIP
   Service through Traefik Ingress
@@ -141,10 +141,10 @@ This keeps the public edge simple:
    helmfile -f infra/helm/helmfile.yaml -l phase=coder apply
    ```
 
-9. Run the in-cluster Coder bootstrap job, then install onboarding:
+9. Run the in-cluster services bootstrap job, then install onboarding:
 
    ```bash
-   helmfile -f infra/helm/helmfile.yaml -l phase=coder-bootstrap apply
+   helmfile -f infra/helm/helmfile.yaml -l phase=services-bootstrap apply
    helmfile -f infra/helm/helmfile.yaml -l phase=onboarding apply
    ```
 
@@ -182,8 +182,9 @@ This keeps the public edge simple:
 - The in-cluster platform PostgreSQL path is now based on two simple
   single-replica `StatefulSet`s. The manifests live in
   `infra/manifests/postgres/`.
-- The Coder admin token and template ID are now produced by the
-  `coder-bootstrap` Helm release, not by manual secret editing.
+- The Coder admin token, Coder template ID, and Gitea onboarding PAT are now
+  produced by the `services-bootstrap` Helm release, not by manual secret
+  editing.
 - The repo ships Route53-oriented DNS-01 templates as the default path and
   keeps Cloudflare templates as an optional alternative. If you use another DNS
   provider, replace only the solver block and keep the `ClusterIssuer` name as

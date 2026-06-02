@@ -203,6 +203,12 @@ async function getCoderUser(identifier: string): Promise<CoderUserLookup | null>
   }
 }
 
+export async function activateCoderUser(user: string): Promise<void> {
+  await coderFetch(`/api/v2/users/${encodeURIComponent(user)}/status/activate`, {
+    method: 'PUT',
+  });
+}
+
 export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
   const orgId = await getOrgId();
   const tempPassword = generateTempPassword();
@@ -232,6 +238,7 @@ export async function ensureCoderUser(email: string): Promise<CoderUserRef> {
         if (e.status === 409 && /user already exists/i.test(e.body)) {
           const existing = await getCoderUser(baseUsername);
           if (existing && existing.email?.toLowerCase() === email.toLowerCase()) {
+            await activateCoderUser(existing.id);
             return {
               id: existing.id,
               username: existing.username,

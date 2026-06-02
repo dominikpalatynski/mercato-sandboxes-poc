@@ -54,7 +54,7 @@ ingress:
   tls:
     - hosts:
         - gitea.sandbox.<yourdomain>.com
-      secretName: gitea-sandbox-palatynskicloud-tls
+      secretName: gitea-sandbox-<yourdomain>-tls
 
 nodeSelector:
   node-pool: system

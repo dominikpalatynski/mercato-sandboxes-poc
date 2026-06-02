@@ -11,3 +11,24 @@ e2e/playwright-report/
 e2e/test-results/
 e2e/blob-report/
 e2e/playwright/.cache/
+
+# Manifests with secrets
+infra/manifests/onboarding/onboarding-app-secrets.yaml
+
+infra/manifests/postgres/postgres-onboarding-app-secret.yaml
+infra/manifests/postgres/postgres-gitea-app-secret.yaml
+infra/manifests/postgres/postgres-coder-app-secret.yaml
+
+infra/manifests/foundation/ghcr-pull-secret.yaml
+infra/manifests/coder/coder-db-url.yaml
+infra/manifests/coder/coder-bootstrap-admin.yaml
+
+
+infra/manifests/cert-manager/cloudflare-api-token-secret.yaml
+infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-cloudflare.yaml
+infra/manifests/cert-manager/clusterissuer-letsencrypt-dns-route53.yaml
+infra/manifests/gitea/gitea-admin-credentials.yaml
+infra/manifests/gitea/gitea-db-url.yaml
+
+infra/manifests/openmercato/openmercato-app-secrets.yaml
+

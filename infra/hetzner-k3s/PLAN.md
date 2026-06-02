@@ -45,7 +45,7 @@ Balancer in front of the cluster.
 - create the `coder-db-url` Secret and onboarding app Secret after the `-rw`
   Services exist
 - install `coder`
-- run `coder-bootstrap` to create the first admin token and push the template
+- run `services-bootstrap` to create generated service tokens and push the Coder template
 - install `onboarding`
 - apply the `letsencrypt-http` `ClusterIssuer` for fixed-host TLS
 - apply the `letsencrypt-dns` `ClusterIssuer` for the Coder + wildcard app TLS

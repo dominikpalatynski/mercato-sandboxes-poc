@@ -12,15 +12,16 @@ import tarfile
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
 def log(message):
-    print(f"[coder-bootstrap] {message}", flush=True)
+    print(f"[services-bootstrap] {message}", flush=True)
 
 
 def fail(message):
-    print(f"[coder-bootstrap] {message}", file=sys.stderr, flush=True)
+    print(f"[services-bootstrap] {message}", file=sys.stderr, flush=True)
     sys.exit(1)
 
 
@@ -53,6 +54,22 @@ ONBOARDING_ADMIN_SECRET_NAME = env(
 ONBOARDING_TEMPLATE_SECRET_NAME = env(
     "ONBOARDING_TEMPLATE_SECRET_NAME", "onboarding-coder-template"
 )
+
+GITEA_URL = env("GITEA_URL", "").rstrip("/")
+GITEA_ADMIN_SECRET_NAME = env("GITEA_ADMIN_SECRET_NAME", "gitea-admin-credentials")
+GITEA_ADMIN_SECRET_NAMESPACE = env("GITEA_ADMIN_SECRET_NAMESPACE", "gitea")
+GITEA_ADMIN_USERNAME_KEY = env("GITEA_ADMIN_USERNAME_KEY", "username")
+GITEA_ADMIN_PASSWORD_KEY = env("GITEA_ADMIN_PASSWORD_KEY", "password")
+GITEA_ONBOARDING_TOKEN_SECRET_NAME = env(
+    "GITEA_ONBOARDING_TOKEN_SECRET_NAME", "gitea-onboarding-admin-token"
+)
+GITEA_ONBOARDING_TOKEN_KEY = env("GITEA_ONBOARDING_TOKEN_KEY", "token")
+GITEA_TOKEN_NAME = env("GITEA_TOKEN_NAME", "onboarding-admin")
+GITEA_TOKEN_SCOPES = [
+    scope.strip()
+    for scope in env("GITEA_TOKEN_SCOPES", "all").split(",")
+    if scope.strip()
+]
 
 NAMESPACE = env("POD_NAMESPACE", env("NAMESPACE", "default"))
 
@@ -124,6 +141,17 @@ def coder_request(path, method="GET", token=None, body=None):
     return http_request(f"{CODER_URL}{path}", method=method, headers=headers, body=body)
 
 
+def gitea_request(path, method="GET", token=None, basic_auth=None, body=None):
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"token {token}"
+    if basic_auth:
+        headers["Authorization"] = "Basic " + base64.b64encode(
+            f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
+        ).decode("ascii")
+    return http_request(f"{GITEA_URL}{path}", method=method, headers=headers, body=body)
+
+
 def k8s_request(path, method="GET", body=None, content_type="application/json"):
     with open(SERVICEACCOUNT_TOKEN_PATH, "r", encoding="utf-8") as token_file:
         service_account_token = token_file.read().strip()
@@ -154,12 +182,37 @@ def wait_for_coder():
     fail(f"timed out waiting for {health_url}")
 
 
-def get_secret_data(name):
-    status, payload = k8s_request(f"/api/v1/namespaces/{NAMESPACE}/secrets/{name}")
+def wait_for_gitea():
+    if not GITEA_URL:
+        return
+    deadline = time.time() + 180
+    health_url = f"{GITEA_URL}/api/healthz"
+    root_url = f"{GITEA_URL}/"
+    while time.time() < deadline:
+        status, _ = http_request(health_url)
+        if status == 200:
+            log(f"Gitea is healthy at {health_url}")
+            return
+        status, _ = http_request(root_url)
+        if status in (200, 302):
+            log(f"Gitea is reachable at {root_url}")
+            return
+        time.sleep(2)
+    fail(f"timed out waiting for {GITEA_URL}")
+
+
+def get_secret_data(name, namespace=None):
+    secret_namespace = namespace or NAMESPACE
+    status, payload = k8s_request(
+        f"/api/v1/namespaces/{secret_namespace}/secrets/{name}"
+    )
     if status == 404:
         return None
     if status != 200:
-        fail(f"failed to fetch secret {name}: HTTP {status} {payload}")
+        fail(
+            f"failed to fetch secret {secret_namespace}/{name}: "
+            f"HTTP {status} {payload}"
+        )
     encoded = payload.get("data", {})
     return {
         key: base64.b64decode(value).decode("utf-8") for key, value in encoded.items()
@@ -214,6 +267,20 @@ def validate_admin_token(token):
     return status == 200
 
 
+def validate_gitea_token(token):
+    if not token or not GITEA_URL:
+        return False
+    me_status, me_payload = gitea_request("/api/v1/user", token=token)
+    if me_status != 200:
+        return False
+    if not bool(me_payload.get("is_admin")):
+        return False
+    admin_status, _ = gitea_request(
+        "/api/v1/admin/users?page=1&limit=1", token=token
+    )
+    return admin_status == 200
+
+
 def ensure_session_token():
     status, payload = coder_request("/api/v2/users/first")
     if status == 404:
@@ -258,24 +325,100 @@ def ensure_admin_token():
             return existing_token
 
     session_token = ensure_session_token()
-    body = {
-        "token_name": CODER_TOKEN_NAME,
-        "scope": "all",
-        "lifetime": CODER_TOKEN_LIFETIME_NS,
-    }
-    status, payload = coder_request(
-        "/api/v2/users/me/keys/tokens",
-        method="POST",
-        token=session_token,
-        body=body,
-    )
-    if status not in (200, 201):
+    for attempt in range(3):
+        token_name = CODER_TOKEN_NAME
+        if attempt > 0:
+            token_name = f"{CODER_TOKEN_NAME}-{int(time.time())}-{attempt}"
+
+        body = {
+            "token_name": token_name,
+            "scope": "all",
+            "lifetime": CODER_TOKEN_LIFETIME_NS,
+        }
+        status, payload = coder_request(
+            "/api/v2/users/me/keys/tokens",
+            method="POST",
+            token=session_token,
+            body=body,
+        )
+        if status in (200, 201):
+            admin_token = payload.get("key")
+            if not admin_token:
+                fail("Coder token API did not return key")
+            apply_secret(ONBOARDING_ADMIN_SECRET_NAME, {"token": admin_token})
+            log(f"minted admin token {token_name}")
+            return admin_token
+
+        if status == 409:
+            log(
+                f"Coder token name {token_name!r} already exists; "
+                "minting a replacement because the Kubernetes secret is missing or invalid"
+            )
+            continue
+
         fail(f"failed to mint admin token: HTTP {status} {payload}")
-    admin_token = payload.get("key")
-    if not admin_token:
-        fail("Coder token API did not return key")
-    apply_secret(ONBOARDING_ADMIN_SECRET_NAME, {"token": admin_token})
-    return admin_token
+
+    fail("failed to mint admin token: all fallback token names already exist")
+
+
+def ensure_gitea_onboarding_token():
+    if not GITEA_URL:
+        log("GITEA_URL is not configured; skipping Gitea onboarding token bootstrap")
+        return None
+
+    existing_secret = get_secret_data(GITEA_ONBOARDING_TOKEN_SECRET_NAME)
+    if existing_secret:
+        existing_token = existing_secret.get(GITEA_ONBOARDING_TOKEN_KEY, "")
+        if validate_gitea_token(existing_token):
+            log(
+                "reusing valid Gitea onboarding token from secret "
+                f"{GITEA_ONBOARDING_TOKEN_SECRET_NAME}"
+            )
+            return existing_token
+
+    admin_secret = get_secret_data(GITEA_ADMIN_SECRET_NAME, GITEA_ADMIN_SECRET_NAMESPACE)
+    if not admin_secret:
+        fail(
+            "missing Gitea admin credentials secret "
+            f"{GITEA_ADMIN_SECRET_NAMESPACE}/{GITEA_ADMIN_SECRET_NAME}"
+        )
+
+    username = admin_secret.get(GITEA_ADMIN_USERNAME_KEY, "")
+    password = admin_secret.get(GITEA_ADMIN_PASSWORD_KEY, "")
+    if not username or not password:
+        fail(
+            "Gitea admin credentials secret is missing username or password keys "
+            f"({GITEA_ADMIN_USERNAME_KEY}, {GITEA_ADMIN_PASSWORD_KEY})"
+        )
+
+    token_name_base = GITEA_TOKEN_NAME
+    for attempt in range(3):
+        token_name = token_name_base
+        if attempt > 0:
+            token_name = f"{token_name_base}-{int(time.time())}-{attempt}"
+
+        body = {"name": token_name, "scopes": GITEA_TOKEN_SCOPES}
+        status, payload = gitea_request(
+            f"/api/v1/users/{urllib.parse.quote(username)}/tokens",
+            method="POST",
+            basic_auth=(username, password),
+            body=body,
+        )
+        if status in (200, 201):
+            token = payload.get("sha1") or payload.get("token") or payload.get("key")
+            if not token:
+                fail("Gitea token API did not return a raw token")
+            apply_secret(GITEA_ONBOARDING_TOKEN_SECRET_NAME, {GITEA_ONBOARDING_TOKEN_KEY: token})
+            log(f"minted Gitea onboarding token {token_name}")
+            return token
+
+        if status in (400, 409, 422) and "already" in str(payload).lower():
+            log(f"Gitea token name {token_name!r} already exists; trying a fallback name")
+            continue
+
+        fail(f"failed to mint Gitea onboarding token: HTTP {status} {payload}")
+
+    fail("failed to mint Gitea onboarding token: all fallback token names already exist")
 
 
 def download_coder_cli():
@@ -412,10 +555,14 @@ def stage_template_dir():
 def main():
     log("waiting for Coder health endpoint")
     wait_for_coder()
+    log("waiting for Gitea health endpoint")
+    wait_for_gitea()
     log("verifying mounted template files")
     verify_template_dir()
     log("staging template files from ConfigMap mount")
     staged_template_dir = stage_template_dir()
+    log("ensuring Gitea onboarding token")
+    ensure_gitea_onboarding_token()
     log("ensuring bootstrap admin token")
     admin_token = ensure_admin_token()
     log("downloading coder CLI")

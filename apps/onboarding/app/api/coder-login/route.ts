@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 
 import { requireSessionFromRequest } from '@/lib/auth';
-import { coderFetch } from '@/lib/coder';
+import { activateCoderUser, coderFetch } from '@/lib/coder';
 import { db } from '@/lib/db';
 import { users } from '@/db/schema';
 
@@ -66,6 +66,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   // 4. Mint a Coder API key for the workspace user via admin API.
   let coderKey: string;
   try {
+    await activateCoderUser(user.coderUserId);
     const keyResp = await coderFetch<KeyResponse>(
       `/api/v2/users/${user.coderUserId}/keys`,
       {
